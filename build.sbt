@@ -1,10 +1,11 @@
-ThisBuild / scalaVersion       := "2.13.12"
-ThisBuild / crossScalaVersions := Seq("2.13.12", "3.3.0")
-ThisBuild / organization       := "com.permutive"
+ThisBuild / scalaVersion           := "2.13.12"
+ThisBuild / crossScalaVersions     := Seq("2.13.12", "3.3.0")
+ThisBuild / organization           := "com.permutive"
+ThisBuild / versionPolicyIntention := Compatibility.BinaryAndSourceCompatible
 
-addCommandAlias("ci-test", "fix --check; mdoc; publishLocal; +test")
+addCommandAlias("ci-test", "fix --check; versionPolicyCheck; mdoc; publishLocal; +test")
 addCommandAlias("ci-docs", "github; mdoc; headerCreateAll")
-addCommandAlias("ci-publish", "github; ci-release")
+addCommandAlias("ci-publish", "versionCheck; github; ci-release")
 
 lazy val documentation = project
   .enablePlugins(MdocPlugin)
