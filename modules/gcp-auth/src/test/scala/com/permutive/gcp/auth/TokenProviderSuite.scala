@@ -26,7 +26,6 @@ import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all._
 
-import com.permutive.gcp.auth.errors.ExpirationNotFound
 import com.permutive.gcp.auth.errors.UnableToGetClientData
 import com.permutive.gcp.auth.errors.UnableToGetDefaultCredentials
 import com.permutive.gcp.auth.errors.UnableToGetToken
@@ -102,9 +101,9 @@ class TokenProviderSuite extends ClientSuite {
 
     val tokenProvider = TokenProvider.identity[IO](client, audience)
 
-    val result = tokenProvider.accessToken.attempt
-
-    assertIO(result, Left(UnableToGetToken(ExpirationNotFound)))
+    interceptIO[UnableToGetToken] {
+      tokenProvider.accessToken
+    }
   }
 
   test("TokenProvider.identity returns an error on any failure") {

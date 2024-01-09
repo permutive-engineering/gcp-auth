@@ -20,7 +20,6 @@ import java.security.interfaces.RSAPrivateKey
 import java.time.Duration
 import java.time.Instant
 import java.util.Date
-import java.util.concurrent.TimeUnit.SECONDS
 
 import scala.annotation.nowarn
 import scala.concurrent.duration._
@@ -108,10 +107,10 @@ object TokenProvider {
     * expiration.
     */
   def cached[F[_]: Temporal]: CachedBuilder[F] =
-    CachedBuilder[F](tokenProvider => Refreshable.builder(tokenProvider.accessToken))
+    new CachedBuilder[F](tokenProvider => Refreshable.builder(tokenProvider.accessToken))
       .safetyPeriod(InstanceMetadataOAuthSafetyPeriod)
 
-  final case class CachedBuilder[F[_]] private[auth] (
+  final class CachedBuilder[F[_]] private[auth] (
       private val builder: TokenProvider[F] => Refreshable.RefreshableBuilder[F, AccessToken]
   ) {
 
@@ -120,32 +119,32 @@ object TokenProvider {
       * have no risk of requests using an expired token
       */
     def safetyPeriod(duration: FiniteDuration): CachedBuilder[F] =
-      copy(builder.map(_.cacheDuration(token => FiniteDuration(token.expiresIn.toLong, SECONDS) - duration)))
+      new CachedBuilder(builder.map(_.cacheDuration(_.expiresIn.seconds - duration)))
 
     /** What to do if retrying to refresh the token fails. The refresh fiber will have failed at this point and the
       * token will grow stale. It is up to the user to handle this failure, as they see fit, in their application
       */
     def onRefreshFailure(callback: PartialFunction[(Throwable, RetryDetails), F[Unit]]): CachedBuilder[F] =
-      copy(builder.map(_.onRefreshFailure(callback)))
+      new CachedBuilder(builder.map(_.onRefreshFailure(callback)))
 
     /** What to do if retrying to refresh the token fails even after retries. The refresh fiber will have failed at this
       * point and the value will grow stale. It is up to the user to handle this failure, as they see fit, in their
       * application
       */
     def onExhaustedRetries(callback: PartialFunction[Throwable, F[Unit]]): CachedBuilder[F] =
-      copy(builder.map(_.onExhaustedRetries(callback)))
+      new CachedBuilder(builder.map(_.onExhaustedRetries(callback)))
 
     /** A callback invoked whenever a new token is generated, the [[scala.concurrent.duration.FiniteDuration]] is the
       * period that will be waited before the next new token
       */
     def onNewToken(callback: (AccessToken, FiniteDuration) => F[Unit]): CachedBuilder[F] =
-      copy(builder.map(_.onNewValue(callback)))
+      new CachedBuilder(builder.map(_.onNewValue(callback)))
 
     /** An optional configuration object for attempting to retry retrieving the token on failure. When no value is
       * supplied this defaults to 5 retries with a delay between each of 200 milliseconds.
       */
     def retryPolicy(retryPolicy: RetryPolicy[F]): CachedBuilder[F] =
-      copy(builder.map(_.retryPolicy(retryPolicy)))
+      new CachedBuilder(builder.map(_.retryPolicy(retryPolicy)))
 
     def build(tokenProvider: TokenProvider[F]): Resource[F, TokenProvider[F]] =
       builder(tokenProvider).resource.map(builder => TokenProvider.create(builder.value))
@@ -184,7 +183,7 @@ object TokenProvider {
             .map(ExpiresIn(_))
             .map(AccessToken(Token(token), _))
         }
-        .adaptError(UnableToGetToken(_))
+        .adaptError(new UnableToGetToken(_))
     }
 
   /** Retrieves a workload service account token using Google's metadata server.
@@ -207,7 +206,7 @@ object TokenProvider {
             Header.Raw(ci"Metadata-Flavor", "Google")
           )
         }
-        .adaptError(UnableToGetToken(_))
+        .adaptError(new UnableToGetToken(_))
     }
 
   /** Retrieves a service account token from Google's OAuth API.
@@ -253,7 +252,7 @@ object TokenProvider {
       .map(token => UrlForm("grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion" -> token))
       .map(POST(_, uri"https://oauth2.googleapis.com/token"))
       .flatMap(httpClient.expect[AccessToken](_))
-      .adaptError(UnableToGetToken(_))
+      .adaptError(new UnableToGetToken(_))
   }
 
   /** Retrieves a user account token from Google's OAuth API.
@@ -298,7 +297,7 @@ object TokenProvider {
 
       httpClient
         .expect[AccessToken](POST(form, uri"https://oauth2.googleapis.com/token"))
-        .adaptError(UnableToGetToken(_))
+        .adaptError(new UnableToGetToken(_))
     }
 
   /** Retrieves a user account token from Google's OAuth API using the "Application Default Credentials" file.

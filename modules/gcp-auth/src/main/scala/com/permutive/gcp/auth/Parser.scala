@@ -48,7 +48,7 @@ private[auth] object Parser {
       .compile
       .onlyOrError
       .map(line => RefreshToken(line.trim()))
-      .adaptError(_ => EmptyRefreshTokenFile(path))
+      .adaptError(_ => new EmptyRefreshTokenFile(path))
 
   final def googleClientSecrets[F[_]: Files: Concurrent](path: Path): F[(ClientId, ClientSecret)] =
     Files[F]
@@ -60,7 +60,7 @@ private[auth] object Parser {
       .flatMap { installed =>
         (installed.get[ClientId]("client_id"), installed.get[ClientSecret]("client_secret")).tupled.liftTo[F]
       }
-      .adaptError(UnableToGetClientSecrets(path, _))
+      .adaptError(new UnableToGetClientSecrets(path, _))
 
   final def googleServiceAccount[F[_]: Files: Sync](path: Path): F[(ClientEmail, RSAPrivateKey)] =
     Files[F]
@@ -72,7 +72,7 @@ private[auth] object Parser {
         (json.hcursor.get[ClientEmail]("client_email"), json.hcursor.get[String]("private_key")).tupled.liftTo[F]
       }
       .flatMap(_.traverse(loadPrivateKey[F]))
-      .adaptError(UnableToGetClientData(path, _))
+      .adaptError(new UnableToGetClientData(path, _))
 
   final def applicationDefaultCredentials[F[_]: Concurrent: Files]: F[(ClientId, ClientSecret, RefreshToken)] =
     Files[F]
@@ -80,7 +80,7 @@ private[auth] object Parser {
       .compile
       .string
       .flatMap(parser.decode[(ClientId, ClientSecret, RefreshToken)](_).liftTo[F])
-      .adaptError(UnableToGetDefaultCredentials(defaultCredentialsFile, _))
+      .adaptError(new UnableToGetDefaultCredentials(defaultCredentialsFile, _))
 
   implicit private val decodeCredentials: Decoder[(ClientId, ClientSecret, RefreshToken)] = c =>
     (c.get[ClientId]("client_id"), c.get[ClientSecret]("client_secret"), c.get[RefreshToken]("refresh_token")).tupled

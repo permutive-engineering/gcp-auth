@@ -20,5 +20,5 @@ import cats.syntax.all._
 
 import fs2.io.file.Path
 
-final case class UnableToGetClientData(path: Path, cause: Throwable)
+final class UnableToGetClientData(path: Path, cause: Throwable)
     extends RuntimeException(show"Attempted to parse client data from `$path` ended in failure", cause)

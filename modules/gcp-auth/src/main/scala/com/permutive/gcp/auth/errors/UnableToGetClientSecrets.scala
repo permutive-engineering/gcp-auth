@@ -20,5 +20,5 @@ import cats.syntax.all._
 
 import fs2.io.file.Path
 
-final case class UnableToGetClientSecrets(path: Path, cause: Throwable)
+final class UnableToGetClientSecrets(path: Path, cause: Throwable)
     extends RuntimeException(show"Attempted to parse client secrets from `$path` ended in failure", cause)

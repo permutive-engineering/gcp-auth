@@ -16,4 +16,4 @@
 
 package com.permutive.gcp.auth.errors
 
-final case class UnableToGetToken(cause: Throwable) extends RuntimeException("Unable to get token", cause)
+final class UnableToGetToken(cause: Throwable) extends RuntimeException("Unable to get token", cause)

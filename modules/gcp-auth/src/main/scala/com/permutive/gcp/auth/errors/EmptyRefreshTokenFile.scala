@@ -20,5 +20,5 @@ import cats.syntax.all._
 
 import fs2.io.file.Path
 
-final case class EmptyRefreshTokenFile(path: Path)
+final class EmptyRefreshTokenFile(path: Path)
     extends RuntimeException(show"Attempted to parse a Google refresh token but the file was empty: $path")

@@ -20,5 +20,5 @@ import cats.syntax.all._
 
 import fs2.io.file.Path
 
-final case class UnableToGetDefaultCredentials(path: Path, cause: Throwable)
+final class UnableToGetDefaultCredentials(path: Path, cause: Throwable)
     extends RuntimeException(show"Attempted to parse default credentials from `$path` ended in failure", cause)
