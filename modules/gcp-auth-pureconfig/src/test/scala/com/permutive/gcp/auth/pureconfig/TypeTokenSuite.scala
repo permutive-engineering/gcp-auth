@@ -16,8 +16,6 @@
 
 package com.permutive.gcp.auth.pureconfig
 
-import scala.util.chaining._
-
 import cats.effect.IO
 import cats.effect.Resource
 
@@ -88,8 +86,10 @@ class TypeTokenSuite extends ClientSuite {
 
   implicit val ConfigConfigReader: ConfigReader[Config] = ConfigReader.forProduct1("token-type")(Config.apply)
 
-  def fixture(resource: String) = Resource.make {
-    IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
-  }(userHome => IO(sys.props.put("user.home", userHome)).void).pipe(ResourceFixture(_))
+  def fixture(resource: String) = ResourceFixture {
+    Resource.make {
+      IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
+    }(userHome => IO(sys.props.put("user.home", userHome)).void)
+  }
 
 }

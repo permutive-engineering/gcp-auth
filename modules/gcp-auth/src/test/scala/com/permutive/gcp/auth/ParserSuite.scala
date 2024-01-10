@@ -16,8 +16,6 @@
 
 package com.permutive.gcp.auth
 
-import scala.util.chaining._
-
 import cats.effect.IO
 import cats.effect.kernel.Resource
 
@@ -173,9 +171,11 @@ class ParserSuite extends CatsEffectSuite {
   // Parser.applicationDefaultCredentials //
   //////////////////////////////////////////
 
-  def fixture(resource: String) = Resource.make {
-    IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
-  }(userHome => IO(sys.props.put("user.home", userHome)).void).pipe(ResourceFixture(_))
+  def fixture(resource: String) = ResourceFixture {
+    Resource.make {
+      IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
+    }(userHome => IO(sys.props.put("user.home", userHome)).void)
+  }
 
   fixture("/default/valid").test("Parser.applicationDefaultCredentials should parse a valid file") { _ =>
     val result = Parser.applicationDefaultCredentials[IO]

@@ -19,7 +19,6 @@ package com.permutive.gcp.auth.models
 import cats.effect.Concurrent
 import cats.syntax.all._
 
-import com.permutive.gcp.auth.models.ExpiresIn
 import io.circe.Decoder
 import org.http4s.AuthScheme
 import org.http4s.Credentials

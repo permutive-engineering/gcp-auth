@@ -20,8 +20,6 @@ import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.time.Instant
 
-import scala.util.chaining._
-
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all._
@@ -232,9 +230,11 @@ class TokenProviderSuite extends ClientSuite {
   // TokenProvider.userAccount(Client) //
   ///////////////////////////////////////
 
-  def fixture(resource: String) = Resource.make {
-    IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
-  }(userHome => IO(sys.props.put("user.home", userHome)).void).pipe(ResourceFixture(_))
+  def fixture(resource: String) = ResourceFixture {
+    Resource.make {
+      IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
+    }(userHome => IO(sys.props.put("user.home", userHome)).void)
+  }
 
   fixture("/default/valid").test {
     "TokenProvider.userAccount(Client) retrieves token successfully"
