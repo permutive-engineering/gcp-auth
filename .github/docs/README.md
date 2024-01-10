@@ -167,7 +167,7 @@ TokenProvider
     .map(_.clientMiddleware(httpClient))
 ```
 
-### Loading a different `TokenProvider` depending on the environment with [pureconfig]
+### Loading a different `TokenProvider` depending on the environment with `pureconfig`
 
 The library also provides a [pureconfig] integration that simplifies the process
 of using a different `TokenProvider` on different environments. For example, you
@@ -215,7 +215,7 @@ val config = Config(TokenType.UserAccount)
 val tokenProvider = config.tokenType.tokenProvider(httpClient)
 ```
 
-## Contributors to this project 
+## Contributors to this project
 
 @CONTRIBUTORS_TABLE@
 
