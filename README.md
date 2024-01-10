@@ -10,8 +10,8 @@ Methods to authenticate with Google services over HTTP
     - [User-Account](#user-account)
   - [Creating and auto-refreshing & cached `TokenProvider`](#creating-and-auto-refreshing--cached-tokenprovider)
   - [Creating an auto-authenticated http4s `Client`](#creating-an-auto-authenticated-http4s-client)
-  - [Loading a different `TokenProvider` depending on the environment with [pureconfig]](#loading-a-different-tokenprovider-depending-on-the-environment-with-pureconfig)
-- [Contributors to this project ](#contributors-to-this-project-)
+  - [Loading a different `TokenProvider` depending on the environment with pureconfig](#loading-a-different-tokenprovider-depending-on-the-environment-with-pureconfig)
+- [Contributors to this project ](#contributors-to-this-project)
 
 ## Installation
 
