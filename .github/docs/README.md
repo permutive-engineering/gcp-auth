@@ -11,6 +11,8 @@ Add the following line to your `build.sbt` file:
 libraryDependencies += "@ORGANIZATION@" %% "@NAME@" % "@VERSION@"
 ```
 
+The library is published for Scala versions: @SUPPORTED_SCALA_VERSIONS@.
+
 ## Usage
 
 This library provides a class `TokenProvider` that is able to retrieve a

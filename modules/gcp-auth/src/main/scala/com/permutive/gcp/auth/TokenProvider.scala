@@ -21,11 +21,9 @@ import java.time.Duration
 import java.time.Instant
 import java.util.Date
 
-import scala.annotation.nowarn
 import scala.concurrent.duration._
 
 import cats.Applicative
-import cats.ApplicativeThrow
 import cats.effect.Async
 import cats.effect.Clock
 import cats.effect.Concurrent
@@ -50,13 +48,12 @@ import com.permutive.refreshable.Refreshable
 import fs2.io.file.Files
 import fs2.io.file.Path
 import org.http4s.Header
-import org.http4s.Method
 import org.http4s.Method.GET
 import org.http4s.Method.POST
+import org.http4s.Request
 import org.http4s.Uri
 import org.http4s.UrlForm
 import org.http4s.client.Client
-import org.http4s.client.dsl.MethodOps
 import org.http4s.syntax.all._
 import org.typelevel.ci._
 import pdi.jwt.JwtCirce
@@ -166,11 +163,10 @@ object TokenProvider {
     */
   def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): TokenProvider[F] =
     TokenProvider.create {
-      val request = GET(
-        uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity" +?
-          ("audience" -> audience),
-        Header.Raw(ci"Metadata-Flavor", "Google")
-      )
+      val uri = uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity" +?
+        ("audience" -> audience)
+
+      val request = Request[F](GET, uri).putHeaders(Header.Raw(ci"Metadata-Flavor", "Google"))
 
       val jwtOptions = JwtOptions(signature = false)
 
@@ -183,7 +179,7 @@ object TokenProvider {
             .map(ExpiresIn(_))
             .map(AccessToken(Token(token), _))
         }
-        .adaptError(new UnableToGetToken(_))
+        .adaptError { case t => new UnableToGetToken(t) }
     }
 
   /** Retrieves a workload service account token using Google's metadata server.
@@ -199,14 +195,13 @@ object TokenProvider {
     */
   def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): TokenProvider[F] =
     TokenProvider.create {
+      val request =
+        Request[F](GET, uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
+          .putHeaders(Header.Raw(ci"Metadata-Flavor", "Google"))
+
       httpClient
-        .expect[AccessToken] {
-          GET(
-            uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token",
-            Header.Raw(ci"Metadata-Flavor", "Google")
-          )
-        }
-        .adaptError(new UnableToGetToken(_))
+        .expect[AccessToken](request)
+        .adaptError { case t => new UnableToGetToken(t) }
     }
 
   /** Retrieves a service account token from Google's OAuth API.
@@ -250,9 +245,9 @@ object TokenProvider {
         .sign(Algorithm.RSA256(privateKey))
     }
       .map(token => UrlForm("grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion" -> token))
-      .map(POST(_, uri"https://oauth2.googleapis.com/token"))
+      .map(Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(_))
       .flatMap(httpClient.expect[AccessToken](_))
-      .adaptError(new UnableToGetToken(_))
+      .adaptError { case t => new UnableToGetToken(t) }
   }
 
   /** Retrieves a user account token from Google's OAuth API.
@@ -295,9 +290,11 @@ object TokenProvider {
         "grant_type"    -> "refresh_token"
       )
 
+      val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
+
       httpClient
-        .expect[AccessToken](POST(form, uri"https://oauth2.googleapis.com/token"))
-        .adaptError(new UnableToGetToken(_))
+        .expect[AccessToken](request)
+        .adaptError { case t => new UnableToGetToken(t) }
     }
 
   /** Retrieves a user account token from Google's OAuth API using the "Application Default Credentials" file.
@@ -321,10 +318,5 @@ object TokenProvider {
     }
 
   def const[F[_]: Applicative](token: AccessToken): TokenProvider[F] = TokenProvider.create(token.pure)
-
-  @nowarn
-  @SuppressWarnings(Array("scalafix:DisableSyntax.implicitConversion"))
-  implicit private def http4sClientSyntaxMethod[F[_]: ApplicativeThrow](method: Method): MethodOps[F] =
-    new MethodOps[F](method)
 
 }
