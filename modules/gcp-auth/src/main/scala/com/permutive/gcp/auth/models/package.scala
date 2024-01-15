@@ -22,7 +22,7 @@ package object models {
 
   object Token extends Tagged[String] {
 
-    def apply(value: String): Token = value.asInstanceOf[Token] // scalafix:ok
+    def apply(value: String): Token = value.asInstanceOf[Token]
 
   }
 
@@ -30,7 +30,7 @@ package object models {
 
   object ExpiresIn extends Tagged[Long] {
 
-    def apply(value: Long): ExpiresIn = value.asInstanceOf[ExpiresIn] // scalafix:ok
+    def apply(value: Long): ExpiresIn = value.asInstanceOf[ExpiresIn]
 
   }
 
@@ -38,7 +38,7 @@ package object models {
 
   object ClientId extends Tagged[String] {
 
-    def apply(value: String): ClientId = value.asInstanceOf[ClientId] // scalafix:ok
+    def apply(value: String): ClientId = value.asInstanceOf[ClientId]
 
   }
 
@@ -46,7 +46,7 @@ package object models {
 
   object ClientEmail extends Tagged[String] {
 
-    def apply(value: String): ClientEmail = value.asInstanceOf[ClientEmail] // scalafix:ok
+    def apply(value: String): ClientEmail = value.asInstanceOf[ClientEmail]
 
   }
 
@@ -54,7 +54,7 @@ package object models {
 
   object ClientSecret extends Tagged[String] {
 
-    def apply(value: String): ClientSecret = value.asInstanceOf[ClientSecret] // scalafix:ok
+    def apply(value: String): ClientSecret = value.asInstanceOf[ClientSecret]
 
   }
 
@@ -62,7 +62,7 @@ package object models {
 
   object RefreshToken extends Tagged[String] {
 
-    def apply(value: String): RefreshToken = value.asInstanceOf[RefreshToken] // scalafix:ok
+    def apply(value: String): RefreshToken = value.asInstanceOf[RefreshToken]
 
   }
 

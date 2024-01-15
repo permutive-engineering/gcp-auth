@@ -26,6 +26,6 @@ abstract class Tagged[A: Decoder: Eq] {
 
   implicit def TaggedEq: Eq[A with Tag] = Eq.instance(Eq[A].eqv)
 
-  implicit def TaggedDecoder: Decoder[A with Tag] = Decoder[A].map(_.asInstanceOf[A with Tag]) // scalafix:ok
+  implicit def TaggedDecoder: Decoder[A with Tag] = Decoder[A].map(_.asInstanceOf[A with Tag])
 
 }

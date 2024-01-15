@@ -203,7 +203,7 @@ class TokenProviderSuite extends ClientSuite {
       Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    val key = KeyPairGenerator.getInstance("RSA").genKeyPair().getPrivate().asInstanceOf[RSAPrivateKey] // scalafix:ok
+    val key = KeyPairGenerator.getInstance("RSA").genKeyPair().getPrivate().asInstanceOf[RSAPrivateKey]
 
     val tokenProvider =
       TokenProvider.serviceAccount[IO](ClientEmail("something"), key, "scope_1" :: "scope_2" :: Nil, client)
@@ -218,7 +218,7 @@ class TokenProviderSuite extends ClientSuite {
   } {
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val key = KeyPairGenerator.getInstance("RSA").genKeyPair().getPrivate().asInstanceOf[RSAPrivateKey] // scalafix:ok
+    val key = KeyPairGenerator.getInstance("RSA").genKeyPair().getPrivate().asInstanceOf[RSAPrivateKey]
 
     val tokenProvider =
       TokenProvider.serviceAccount[IO](ClientEmail("something"), key, "scope_1" :: "scope_2" :: Nil, client)
