@@ -106,7 +106,7 @@ private[auth] object Parser {
       val decoded = Base64.getMimeDecoder.decode(encoded.trim())
       val spec    = new PKCS8EncodedKeySpec(decoded)
 
-      KeyFactory.getInstance("RSA").generatePrivate(spec).asInstanceOf[RSAPrivateKey] // scalafix:ok
+      KeyFactory.getInstance("RSA").generatePrivate(spec).asInstanceOf[RSAPrivateKey]
     }
 
 }
