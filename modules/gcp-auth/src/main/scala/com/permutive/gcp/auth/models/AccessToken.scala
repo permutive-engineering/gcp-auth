@@ -37,13 +37,15 @@ sealed abstract class AccessToken(val token: Token, val expiresIn: ExpiresIn) ex
     case _              => false
   }
 
-  def asHeader: Authorization = Authorization(Credentials.Token(AuthScheme.Bearer, token))
+  def asHeader: Authorization = Authorization(Credentials.Token(AuthScheme.Bearer, token.value))
 
 }
 
 object AccessToken {
 
   def apply(token: Token, expiresIn: ExpiresIn): AccessToken = new AccessToken(token, expiresIn) {}
+
+  def unapply(token: AccessToken): Some[(Token, ExpiresIn)] = Some((token.token, token.expiresIn))
 
   lazy val noop = new AccessToken(Token("noop"), ExpiresIn(3600)) {}
 

@@ -116,7 +116,7 @@ object TokenProvider {
       * have no risk of requests using an expired token
       */
     def safetyPeriod(duration: FiniteDuration): CachedBuilder[F] =
-      new CachedBuilder(builder.map(_.cacheDuration(_.expiresIn.seconds - duration)))
+      new CachedBuilder(builder.map(_.cacheDuration(_.expiresIn.value.seconds - duration)))
 
     /** What to do if retrying to refresh the token fails. The refresh fiber will have failed at this point and the
       * token will grow stale. It is up to the user to handle this failure, as they see fit, in their application
@@ -241,7 +241,7 @@ object TokenProvider {
         .withExpiresAt(Date.from(now.plusMillis(1.hour.toMillis)))
         .withAudience("https://oauth2.googleapis.com/token")
         .withClaim("scope", scope.mkString(" "))
-        .withClaim("iss", clientEmail)
+        .withClaim("iss", clientEmail.value)
         .sign(Algorithm.RSA256(privateKey))
     }
       .map(token => UrlForm("grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion" -> token))
@@ -284,9 +284,9 @@ object TokenProvider {
   ): TokenProvider[F] =
     TokenProvider.create {
       val form = UrlForm(
-        "refresh_token" -> refreshToken,
-        "client_id"     -> clientId,
-        "client_secret" -> clientSecret,
+        "refresh_token" -> refreshToken.value,
+        "client_id"     -> clientId.value,
+        "client_secret" -> clientSecret.value,
         "grant_type"    -> "refresh_token"
       )
 
