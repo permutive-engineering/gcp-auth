@@ -83,8 +83,8 @@ class TokenProviderSuite extends ClientSuite {
     for {
       token <- tokenProvider.accessToken
     } yield {
-      assert(token.token.nonEmpty)
-      assert(token.expiresIn <= 60)
+      assert(token.token.value.nonEmpty)
+      assert(token.expiresIn.value <= 60)
     }
   }
 
