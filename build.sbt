@@ -1,5 +1,5 @@
-ThisBuild / scalaVersion           := "2.13.12"
-ThisBuild / crossScalaVersions     := Seq("2.12.18", "2.13.12", "3.3.1")
+ThisBuild / scalaVersion           := "2.13.13"
+ThisBuild / crossScalaVersions     := Seq("2.12.19", "2.13.13", "3.3.3")
 ThisBuild / organization           := "com.permutive"
 ThisBuild / versionPolicyIntention := Compatibility.None
 
@@ -13,10 +13,10 @@ lazy val documentation = project
 
 lazy val `gcp-auth` = module
   .settings(libraryDependencies += "com.auth0" % "java-jwt" % "4.4.0")
-  .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "9.4.6")
+  .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "10.0.0")
   .settings(libraryDependencies += "com.permutive" %% "refreshable" % "1.1.0")
-  .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.25")
-  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.25")
+  .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.26")
+  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.26")
   .settings(libraryDependencies += "com.alejandrohdezma" %% "http4s-munit" % "0.15.1" % Test)
   .settings(Test / fork := true)
 
