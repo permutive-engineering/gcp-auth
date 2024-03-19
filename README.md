@@ -10,15 +10,15 @@ Methods to authenticate with Google services over HTTP
     - [User-Account](#user-account)
   - [Creating and auto-refreshing & cached `TokenProvider`](#creating-and-auto-refreshing--cached-tokenprovider)
   - [Creating an auto-authenticated http4s `Client`](#creating-an-auto-authenticated-http4s-client)
-  - [Loading a different `TokenProvider` depending on the environment with pureconfig](#loading-a-different-tokenprovider-depending-on-the-environment-with-pureconfig)
-- [Contributors to this project ](#contributors-to-this-project)
+  - [Loading a different `TokenProvider` depending on the environment with `pureconfig`](#loading-a-different-tokenprovider-depending-on-the-environment-with-pureconfig)
+- [Contributors to this project](#contributors-to-this-project)
 
 ## Installation
 
 Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth" % "0.1.0"
+libraryDependencies += "com.permutive" %% "gcp-auth" % "0.2.0"
 ```
 
 The library is published for Scala versions: `2.12`, `2.13` and `3`.
@@ -156,7 +156,7 @@ TokenProvider
     .map(_.clientMiddleware(httpClient))
 ```
 
-### Loading a different `TokenProvider` depending on the environment with [pureconfig]
+### Loading a different `TokenProvider` depending on the environment with `pureconfig`
 
 The library also provides a [pureconfig] integration that simplifies the process
 of using a different `TokenProvider` on different environments. For example, you
@@ -168,7 +168,7 @@ the appropriate `TokenProvider` using pureconfig:
 1. Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "0.1.0"
+libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "0.2.0"
 ```
 
 2. Use the following type in your configuration class:
@@ -194,7 +194,7 @@ token-type = "no-op"
 val tokenProvider = config.tokenType.tokenProvider(httpClient)
 ```
 
-## Contributors to this project 
+## Contributors to this project
 
 | <a href="https://github.com/alejandrohdezma"><img alt="alejandrohdezma" src="https://avatars.githubusercontent.com/u/9027541?v=4&s=120" width="120px" /></a> |
 | :--: |
