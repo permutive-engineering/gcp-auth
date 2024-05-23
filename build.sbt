@@ -1,7 +1,7 @@
-ThisBuild / scalaVersion           := "2.13.13"
-ThisBuild / crossScalaVersions     := Seq("2.12.19", "2.13.13", "3.3.3")
+ThisBuild / scalaVersion           := "2.13.14"
+ThisBuild / crossScalaVersions     := Seq("2.12.19", "2.13.14", "3.3.3")
 ThisBuild / organization           := "com.permutive"
-ThisBuild / versionPolicyIntention := Compatibility.BinaryAndSourceCompatible
+ThisBuild / versionPolicyIntention := Compatibility.None
 
 addCommandAlias("ci-test", "fix --check; versionPolicyCheck; mdoc; publishLocal; +test")
 addCommandAlias("ci-docs", "github; mdoc; headerCreateAll")
@@ -13,10 +13,10 @@ lazy val documentation = project
 
 lazy val `gcp-auth` = module
   .settings(libraryDependencies += "com.auth0" % "java-jwt" % "4.4.0")
-  .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "10.0.0")
-  .settings(libraryDependencies += "com.permutive" %% "refreshable" % "1.1.0")
-  .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.26")
-  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.26")
+  .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "10.0.1")
+  .settings(libraryDependencies += "com.permutive" %% "refreshable" % "2.0.0")
+  .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.27")
+  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.27")
   .settings(libraryDependencies += "com.alejandrohdezma" %% "http4s-munit" % "0.15.1" % Test)
   .settings(Test / fork := true)
 
