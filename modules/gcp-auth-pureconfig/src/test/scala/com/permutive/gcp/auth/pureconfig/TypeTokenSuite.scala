@@ -24,14 +24,15 @@ import com.permutive.gcp.auth.models.ExpiresIn
 import com.permutive.gcp.auth.models.Token
 import io.circe.Json
 import io.circe.syntax._
-import munit.ClientSuite
+import munit.CatsEffectSuite
+import munit.Http4sMUnitSyntax
 import org.http4s.HttpApp
 import org.http4s.circe._
 import org.http4s.client.Client
 import pureconfig.ConfigReader
 import pureconfig.ConfigSource
 
-class TypeTokenSuite extends ClientSuite {
+class TypeTokenSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
   fixture("/").test {
     "TokenType.UserAccount can be loaded from configuration"
@@ -86,7 +87,7 @@ class TypeTokenSuite extends ClientSuite {
 
   implicit val ConfigConfigReader: ConfigReader[Config] = ConfigReader.forProduct1("token-type")(Config.apply)
 
-  def fixture(resource: String) = ResourceFixture {
+  def fixture(resource: String) = ResourceFunFixture {
     Resource.make {
       IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
     }(userHome => IO(sys.props.put("user.home", userHome)).void)

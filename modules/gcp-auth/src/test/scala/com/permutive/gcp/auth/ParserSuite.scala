@@ -171,7 +171,7 @@ class ParserSuite extends CatsEffectSuite {
   // Parser.applicationDefaultCredentials //
   //////////////////////////////////////////
 
-  def fixture(resource: String) = ResourceFixture {
+  def fixture(resource: String) = ResourceFunFixture {
     Resource.make {
       IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
     }(userHome => IO(sys.props.put("user.home", userHome)).void)

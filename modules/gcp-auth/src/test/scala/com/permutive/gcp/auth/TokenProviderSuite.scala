@@ -37,17 +37,17 @@ import com.permutive.gcp.auth.models.Token
 import fs2.Stream
 import io.circe.Json
 import io.circe.syntax._
-import munit.ClientSuite
+import munit.CatsEffectSuite
+import munit.Http4sMUnitSyntax
 import org.http4s.HttpApp
 import org.http4s.Request
 import org.http4s.circe._
 import org.http4s.client.Client
-import org.http4s.syntax.all._
 import org.typelevel.ci._
 import pdi.jwt.JwtCirce
 import pdi.jwt.JwtClaim
 
-class TokenProviderSuite extends ClientSuite {
+class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
   /////////////////////////
   // TokenProvider.const //
@@ -230,7 +230,7 @@ class TokenProviderSuite extends ClientSuite {
   // TokenProvider.userAccount(Client) //
   ///////////////////////////////////////
 
-  def fixture(resource: String) = ResourceFixture {
+  def fixture(resource: String) = ResourceFunFixture {
     Resource.make {
       IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
     }(userHome => IO(sys.props.put("user.home", userHome)).void)
