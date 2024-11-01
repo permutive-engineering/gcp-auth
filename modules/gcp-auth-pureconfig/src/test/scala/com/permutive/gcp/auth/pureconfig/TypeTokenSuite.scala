@@ -83,7 +83,7 @@ class TypeTokenSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     assertIO(result, AccessToken.noop)
   }
 
-  case class Config(tokenType: TokenType)
+  final case class Config(tokenType: TokenType)
 
   implicit val ConfigConfigReader: ConfigReader[Config] = ConfigReader.forProduct1("token-type")(Config.apply)
 
