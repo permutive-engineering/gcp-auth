@@ -42,7 +42,7 @@ val pathToRefreshTokenPath = Path("")
 val privateKey = KeyPairGenerator.getInstance("RSA").generateKeyPair().getPrivate().asInstanceOf[RSAPrivateKey]
 ```
 
-#### Identity
+#### Identity (via service-account)
 
 Retrieves an [Identity Token] using Google's metadata server for a specific audience.
 
@@ -57,6 +57,21 @@ import com.permutive.gcp.auth.TokenProvider
 val audience = uri"https://my-run-app.a.run.app"
 
 TokenProvider.identity[IO](httpClient, audience)
+```
+
+#### Identity (via user-account)
+
+Retrieves an [Identity Token] using your user account credentials.
+
+Identity tokens can be used for calling Cloud Run services.
+
+**Warning!** Be sure to keep these tokens secure, and never use them in a
+production environment. They are meant to be used during development only.
+
+```scala mdoc:silent
+import com.permutive.gcp.auth.TokenProvider
+
+TokenProvider.userIdentity[IO](httpClient)
 ```
 
 #### Service-Account
@@ -206,13 +221,16 @@ import cats.effect.Resource
 
 import org.http4s.client.Client
 import org.http4s.Response
+import org.http4s.Uri
 
 val httpClient: Client[IO] = Client[IO] { _ => Resource.pure(Response[IO]())}
 val config = Config(TokenType.UserAccount)
+val myAudience = Uri.unsafeFromString("https://my-run-app.a.run.app")
 ```
 
 ```scala mdoc:silent
 val tokenProvider = config.tokenType.tokenProvider(httpClient)
+val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, myAudience)
 ```
 
 ## Contributors to this project
