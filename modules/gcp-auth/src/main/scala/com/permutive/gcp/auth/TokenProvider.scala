@@ -47,12 +47,15 @@ import com.permutive.gcp.auth.models.Token
 import com.permutive.refreshable.Refreshable
 import fs2.io.file.Files
 import fs2.io.file.Path
+import io.circe.Decoder
+import io.circe.Json
 import org.http4s.Header
 import org.http4s.Method.GET
 import org.http4s.Method.POST
 import org.http4s.Request
 import org.http4s.Uri
 import org.http4s.UrlForm
+import org.http4s.circe._
 import org.http4s.client.Client
 import org.http4s.syntax.all._
 import org.typelevel.ci._
@@ -180,6 +183,37 @@ object TokenProvider {
             .map(AccessToken(Token(token), _))
         }
         .adaptError { case t => new UnableToGetToken(t) }
+    }
+
+  /** Retrieves an identity token using your user account credentials.
+    *
+    * Identity tokens can be used for calling Cloud Run services.
+    *
+    * '''Warning!''' Be sure to keep these tokens secure, and never use them in a production environment. They are meant
+    * to be used during development only.
+    *
+    * @see
+    *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
+    */
+  def userIdentity[F[_]: Concurrent: Files](httpClient: Client[F]): F[TokenProvider[F]] =
+    Parser.applicationDefaultCredentials.map { case (clientId, clientSecret, refreshToken) =>
+      TokenProvider.create {
+        val form = UrlForm(
+          "refresh_token" -> refreshToken.value,
+          "client_id"     -> clientId.value,
+          "client_secret" -> clientSecret.value,
+          "grant_type"    -> "refresh_token"
+        )
+
+        val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
+
+        val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
+
+        httpClient
+          .expect[Json](request)
+          .flatMap(_.as[AccessToken](decoder).liftTo[F])
+          .adaptError { case t => new UnableToGetToken(t) }
+      }
     }
 
   /** Retrieves a workload service account token using Google's metadata server.

@@ -114,6 +114,36 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     interceptIO[UnableToGetToken](tokenProvider.accessToken)
   }
 
+  ////////////////////////////
+  // TokenProvider.userIdentity //
+  ////////////////////////////
+
+  fixture("/default/valid").test {
+    "TokenProvider.userIdentity retrieves and calculates expiration"
+  } { _ =>
+    val client = Client.from { case POST -> Root / "token" =>
+      Ok(Json.obj("id_token" := "token", "expires_in" := 3600))
+    }
+
+    for {
+      tokenProvider <- TokenProvider.userIdentity[IO](client)
+      token         <- tokenProvider.accessToken
+    } yield {
+      assert(token.token.value.nonEmpty)
+      assertEquals(token.expiresIn.value, 3600L)
+    }
+  }
+
+  fixture("/").test {
+    "TokenProvider.userIdentity returns an error when default credentials cannot be found"
+  } { _ =>
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    interceptIO[UnableToGetDefaultCredentials] {
+      TokenProvider.userIdentity[IO](client).flatMap(_.accessToken)
+    }
+  }
+
   //////////////////////////////////////////
   // TokenProvider.serviceAccount(Client) //
   //////////////////////////////////////////
@@ -230,12 +260,6 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
   // TokenProvider.userAccount(Client) //
   ///////////////////////////////////////
 
-  def fixture(resource: String) = ResourceFunFixture {
-    Resource.make {
-      IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
-    }(userHome => IO(sys.props.put("user.home", userHome)).void)
-  }
-
   fixture("/default/valid").test {
     "TokenProvider.userAccount(Client) retrieves token successfully"
   } { _ =>
@@ -339,6 +363,16 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     val result = authedClient.expect[String]("hello")
 
     assertIO(result, "Success!")
+  }
+
+  //////////////
+  // Fixtures //
+  //////////////
+
+  def fixture(resource: String) = ResourceFunFixture {
+    Resource.make {
+      IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
+    }(userHome => IO(sys.props.put("user.home", userHome)).void)
   }
 
   private def resourcePath(file: String) = fs2.io.file.Path(getClass.getResource("/").getPath()) / file
