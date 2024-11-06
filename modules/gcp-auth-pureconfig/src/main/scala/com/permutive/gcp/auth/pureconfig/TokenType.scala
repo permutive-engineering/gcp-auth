@@ -17,12 +17,14 @@
 package com.permutive.gcp.auth.pureconfig
 
 import cats.effect.Concurrent
+import cats.effect.kernel.Clock
 import cats.syntax.all._
 
 import _root_.pureconfig.ConfigReader
 import com.permutive.gcp.auth.TokenProvider
 import com.permutive.gcp.auth.models.AccessToken
 import fs2.io.file.Files
+import org.http4s.Uri
 import org.http4s.client.Client
 
 /** Provides a convenient way to initialise a [[com.permutive.gcp.auth.TokenProvider TokenProvider]] using pureconfig.
@@ -46,6 +48,21 @@ sealed trait TokenType {
     case TokenType.ServiceAccount => TokenProvider.serviceAccount[F](httpClient).pure[F]
     case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
   }
+
+  /** Creates a [[com.permutive.gcp.auth.TokenProvider TokenProvider]] that provides identity tokens using a different
+    * method depending on the instance:
+    *
+    *   - [[TokenType.UserAccount]]: the provider will be created using `TokenProvider.userIdentity`.
+    *   - [[TokenType.ServiceAccount]]: the provider will be created using `TokenProvider.identity`.
+    *   - [[TokenType.NoOp]]: will return a provider that always returns
+    *     [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]].
+    */
+  def identityTokenProvider[F[_]: Files: Concurrent: Clock](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
+    this match {
+      case TokenType.UserAccount    => TokenProvider.userIdentity[F](httpClient)
+      case TokenType.ServiceAccount => TokenProvider.identity[F](httpClient, audience).pure[F]
+      case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
+    }
 
 }
 
