@@ -83,14 +83,18 @@ class TypeTokenSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     assertIO(result, AccessToken.noop)
   }
 
-  case class Config(tokenType: TokenType)
-
-  implicit val ConfigConfigReader: ConfigReader[Config] = ConfigReader.forProduct1("token-type")(Config.apply)
-
   def fixture(resource: String) = ResourceFunFixture {
     Resource.make {
       IO(sys.props("user.home")).flatTap(_ => IO(sys.props.put("user.home", getClass.getResource(resource).getPath())))
     }(userHome => IO(sys.props.put("user.home", userHome)).void)
   }
+
+}
+
+final case class Config(tokenType: TokenType)
+
+object Config {
+
+  implicit val ConfigConfigReader: ConfigReader[Config] = ConfigReader.forProduct1("token-type")(Config.apply)
 
 }
