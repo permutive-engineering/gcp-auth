@@ -1,7 +1,7 @@
 ThisBuild / scalaVersion           := "2.13.15"
 ThisBuild / crossScalaVersions     := Seq("2.12.20", "2.13.15", "3.3.4")
 ThisBuild / organization           := "com.permutive"
-ThisBuild / versionPolicyIntention := Compatibility.BinaryCompatible
+ThisBuild / versionPolicyIntention := Compatibility.BinaryAndSourceCompatible
 
 addCommandAlias("ci-test", "fix --check; versionPolicyCheck; mdoc; publishLocal; +test")
 addCommandAlias("ci-docs", "github; mdoc; headerCreateAll")
