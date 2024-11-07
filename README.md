@@ -5,7 +5,8 @@ Methods to authenticate with Google services over HTTP
 - [Installation](#installation)
 - [Usage](#usage)
   - [Available token providers](#available-token-providers)
-    - [Identity](#identity)
+    - [Identity (via service-account)](#identity-via-service-account)
+    - [Identity (via user-account)](#identity-via-user-account)
     - [Service-Account](#service-account)
     - [User-Account](#user-account)
   - [Creating and auto-refreshing & cached `TokenProvider`](#creating-and-auto-refreshing--cached-tokenprovider)
@@ -18,7 +19,7 @@ Methods to authenticate with Google services over HTTP
 Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth" % "1.1.0"
+libraryDependencies += "com.permutive" %% "gcp-auth" % "1.2.0"
 ```
 
 The library is published for Scala versions: `2.12`, `2.13` and `3`.
@@ -31,7 +32,7 @@ specific type of access token from [Google OAuth 2.0] API.
 ### Available token providers
 
 
-#### Identity
+#### Identity (via service-account)
 
 Retrieves an [Identity Token] using Google's metadata server for a specific audience.
 
@@ -46,6 +47,21 @@ import com.permutive.gcp.auth.TokenProvider
 val audience = uri"https://my-run-app.a.run.app"
 
 TokenProvider.identity[IO](httpClient, audience)
+```
+
+#### Identity (via user-account)
+
+Retrieves an [Identity Token] using your user account credentials.
+
+Identity tokens can be used for calling Cloud Run services.
+
+**Warning!** Be sure to keep these tokens secure, and never use them in a
+production environment. They are meant to be used during development only.
+
+```scala
+import com.permutive.gcp.auth.TokenProvider
+
+TokenProvider.userIdentity[IO](httpClient)
 ```
 
 #### Service-Account
@@ -168,7 +184,7 @@ the appropriate `TokenProvider` using pureconfig:
 1. Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "1.1.0"
+libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "1.2.0"
 ```
 
 2. Use the following type in your configuration class:
@@ -192,6 +208,7 @@ token-type = "no-op"
 
 ```scala
 val tokenProvider = config.tokenType.tokenProvider(httpClient)
+val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, myAudience)
 ```
 
 ## Contributors to this project
