@@ -21,7 +21,7 @@ lazy val `gcp-auth` = module
   .settings(Test / fork := true)
 
 lazy val `gcp-auth-pureconfig` = module
-  .settings(libraryDependencies += "com.github.pureconfig" %% "pureconfig-core" % "0.17.7")
+  .settings(libraryDependencies += "com.github.pureconfig" %% "pureconfig-core" % "0.17.8")
   .settings(libraryDependencies += "com.alejandrohdezma" %% "http4s-munit" % "1.1.0" % Test)
   .settings(Test / fork := true)
   .dependsOn(`gcp-auth`)
