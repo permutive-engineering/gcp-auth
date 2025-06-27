@@ -22,7 +22,7 @@ Add the following line to your `build.sbt` file:
 libraryDependencies += "com.permutive" %% "gcp-auth" % "1.2.0"
 ```
 
-The library is published for Scala versions: `2.12`, `2.13` and `3`.
+The library is published for Scala versions: `2.13` and `3`.
 
 ## Usage
 
