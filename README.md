@@ -19,7 +19,7 @@ Methods to authenticate with Google services over HTTP
 Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth" % "1.2.0"
+libraryDependencies += "com.permutive" %% "gcp-auth" % "2.0.0"
 ```
 
 The library is published for Scala versions: `2.13` and `3`.
@@ -184,7 +184,7 @@ the appropriate `TokenProvider` using pureconfig:
 1. Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "1.2.0"
+libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "2.0.0"
 ```
 
 2. Use the following type in your configuration class:
@@ -213,9 +213,9 @@ val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, m
 
 ## Contributors to this project
 
-| <a href="https://github.com/alejandrohdezma"><img alt="alejandrohdezma" src="https://avatars.githubusercontent.com/u/9027541?v=4&s=120" width="120px" /></a> |
-| :--: |
-| <a href="https://github.com/alejandrohdezma"><sub><b>alejandrohdezma</b></sub></a> |
+| <a href="https://github.com/alejandrohdezma"><img alt="alejandrohdezma" src="https://avatars.githubusercontent.com/u/9027541?v=4&s=120" width="120px" /></a> | <a href="https://github.com/izsob"><img alt="izsob" src="https://avatars.githubusercontent.com/u/669110?v=4&s=120" width="120px" /></a> |
+| :--: | :--: |
+| <a href="https://github.com/alejandrohdezma"><sub><b>alejandrohdezma</b></sub></a> | <a href="https://github.com/izsob"><sub><b>izsob</b></sub></a> |
 
 [Google OAuth 2.0]: https://developers.google.com/identity/protocols/OAuth2
 [`TokenProvider`]: modules/google-auth/src/main/scala/com/permutive/google/auth/TokenProvider.scala
