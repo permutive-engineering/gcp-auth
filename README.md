@@ -19,7 +19,7 @@ Methods to authenticate with Google services over HTTP
 Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth" % "2.0.0"
+libraryDependencies += "com.permutive" %% "gcp-auth" % "2.0.1"
 ```
 
 The library is published for Scala versions: `2.13` and `3`.
@@ -184,7 +184,7 @@ the appropriate `TokenProvider` using pureconfig:
 1. Add the following line to your `build.sbt` file:
 
 ```sbt
-libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "2.0.0"
+libraryDependencies += "com.permutive" %% "gcp-auth-pureconfig" % "2.0.1"
 ```
 
 2. Use the following type in your configuration class:
