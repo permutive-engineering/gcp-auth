@@ -12,7 +12,7 @@ lazy val documentation = project
   .dependsOn(`gcp-auth`, `gcp-auth-pureconfig`)
 
 lazy val `gcp-auth` = module
-  .settings(libraryDependencies += "com.auth0" % "java-jwt" % "4.5.0")
+  .settings(libraryDependencies += "com.auth0" % "java-jwt" % "4.5.2")
   .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "11.0.2")
   .settings(libraryDependencies += "com.permutive" %% "refreshable" % "2.1.1")
   .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.30")
