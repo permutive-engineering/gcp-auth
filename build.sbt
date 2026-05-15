@@ -16,7 +16,7 @@ lazy val `gcp-auth` = module
   .settings(libraryDependencies += "com.github.jwt-scala" %% "jwt-circe" % "11.0.4")
   .settings(libraryDependencies += "com.permutive" %% "refreshable" % "2.1.1")
   .settings(libraryDependencies += "org.http4s" %% "http4s-client" % "0.23.30")
-  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.30")
+  .settings(libraryDependencies += "org.http4s" %% "http4s-circe" % "0.23.34")
   .settings(libraryDependencies += "com.alejandrohdezma" %% "http4s-munit" % "2.0.0" % Test)
   .settings(Test / fork := true)
 
