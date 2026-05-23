@@ -27,7 +27,6 @@ import io.circe.Encoder
 
 final class ClientId(val value: String) extends AnyVal with Serializable {
 
-  @SuppressWarnings(Array("scalafix:Disable.toString"))
   override def toString(): String = value
 
 }

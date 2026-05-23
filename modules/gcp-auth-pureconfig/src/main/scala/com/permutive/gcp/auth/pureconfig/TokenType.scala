@@ -78,6 +78,7 @@ object TokenType {
     case "user-account"    => TokenType.UserAccount.some
     case "service-account" => TokenType.ServiceAccount.some
     case "no-op"           => TokenType.NoOp.some
+    case _                 => None
   }
 
 }
