@@ -28,10 +28,8 @@ import org.http4s.headers.Authorization
 
 sealed abstract class AccessToken(val token: Token, val expiresIn: ExpiresIn) extends Serializable {
 
-  @SuppressWarnings(Array("scalafix:Disable.toString"))
   override def toString(): String = show"AccessToken(token=REDACTED,expiresIn=$expiresIn"
 
-  @SuppressWarnings(Array("scalafix:Disable.equals"))
   override def equals(obj: Any): Boolean = obj match {
     case a: AccessToken => a.token === token && a.expiresIn === expiresIn
     case _              => false
