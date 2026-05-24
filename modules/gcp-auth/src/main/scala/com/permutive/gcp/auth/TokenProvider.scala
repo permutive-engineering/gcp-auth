@@ -88,13 +88,15 @@ trait TokenProvider[F[_]] {
 
 object TokenProvider {
 
-  def apply[F[_]](implicit ev: TokenProvider[F]): TokenProvider[F] = ev
+  final private class Impl[F[_]](_accessToken: F[AccessToken]) extends TokenProvider[F] {
 
-  def create[F[_]](fa: F[AccessToken]): TokenProvider[F] = new TokenProvider[F] {
-
-    override def accessToken: F[AccessToken] = fa
+    override def accessToken: F[AccessToken] = _accessToken
 
   }
+
+  def apply[F[_]](implicit ev: TokenProvider[F]): TokenProvider[F] = ev
+
+  def create[F[_]](fa: F[AccessToken]): TokenProvider[F] = new Impl(fa)
 
   /** Suitable safety period for an token from the instance metadata.
     *
