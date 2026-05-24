@@ -16,9 +16,11 @@
 
 package com.permutive.gcp.auth
 
+import java.nio.charset.StandardCharsets.UTF_8
 import java.security.interfaces.RSAPrivateKey
 import java.time.Duration
 import java.time.Instant
+import java.util.Base64
 import java.util.Date
 
 import scala.concurrent.duration._
@@ -51,6 +53,7 @@ import fs2.io.file.Files
 import fs2.io.file.Path
 import io.circe.Decoder
 import io.circe.Json
+import io.circe.parser
 import org.http4s.EntityDecoder
 import org.http4s.Header
 import org.http4s.Method.GET
@@ -73,6 +76,27 @@ trait TokenProvider[F[_]] {
   /** Retrieve a valid access token. */
   def accessToken: F[AccessToken]
 
+  /** The principal (subject identifier) this provider is authenticated as.
+    *
+    * Every factory in this object produces a `TokenProvider` whose `principal` makes at most one underlying lookup —
+    * service-account flows that already know the email return it synchronously, and every flow that needs an HTTP call
+    * (metadata `/email`, `userinfo`, decoding an issued JWT) memoises the result at construction time.
+    *
+    *   - Workload flows (`serviceAccount(client)`, `identity(client, audience)`) hit the GCE metadata server's `/email`
+    *     endpoint. Failures here surface as errors in `F` — the workload context is documented as GCP-only, so a
+    *     missing metadata server is a real misconfiguration.
+    *   - User-account flows (`userAccount(...)`) do a best-effort `userinfo` call and return `None` on failure (the
+    *     refresh token may have been issued with scopes that don't include `email`/`openid`/`profile`).
+    *   - Identity-token flows (`userIdentity(...)`) decode the issued JWT and return `None` if it carries no `email`
+    *     claim.
+    *   - [[TokenProvider$.create]] (and therefore [[TokenProvider$.const]]) return `None`.
+    */
+  def principal: F[Option[String]]
+
+  private[auth] def withPrincipal(principal: F[Option[String]]): TokenProvider[F]
+
+  private[auth] def withPrincipal(principal: String): TokenProvider[F]
+
   /** Wraps a [[org.http4s.client.Client Client]] ensuring every request coming out from this client contain an
     * `Authorization` header with an [[com.permutive.gcp.auth.models.AccessToken AccessToken]].
     */
@@ -88,15 +112,24 @@ trait TokenProvider[F[_]] {
 
 object TokenProvider {
 
-  final private class Impl[F[_]](_accessToken: F[AccessToken]) extends TokenProvider[F] {
+  final private class Impl[F[_]: Applicative](_accessToken: F[AccessToken], _principal: F[Option[String]])
+      extends TokenProvider[F] {
 
     override def accessToken: F[AccessToken] = _accessToken
+
+    override def principal: F[Option[String]] = _principal
+
+    override private[auth] def withPrincipal(principal: F[Option[String]]): TokenProvider[F] =
+      new Impl(_accessToken, principal)
+
+    override private[auth] def withPrincipal(principal: String): TokenProvider[F] =
+      withPrincipal(Applicative[F].pure(Option(principal)))
 
   }
 
   def apply[F[_]](implicit ev: TokenProvider[F]): TokenProvider[F] = ev
 
-  def create[F[_]](fa: F[AccessToken]): TokenProvider[F] = new Impl(fa)
+  def create[F[_]: Applicative](fa: F[AccessToken]): TokenProvider[F] = new Impl(fa, Applicative[F].pure(None))
 
   /** Suitable safety period for an token from the instance metadata.
     *
@@ -115,7 +148,7 @@ object TokenProvider {
     new CachedBuilder[F](tokenProvider => Refreshable.builder(tokenProvider.accessToken))
       .safetyPeriod(InstanceMetadataOAuthSafetyPeriod)
 
-  final class CachedBuilder[F[_]] private[auth] (
+  final class CachedBuilder[F[_]: Applicative] private[auth] (
       private val builder: TokenProvider[F] => Refreshable.RefreshableBuilder[F, AccessToken]
   ) {
 
@@ -152,7 +185,9 @@ object TokenProvider {
       new CachedBuilder(builder.map(_.retryPolicy(retryPolicy)))
 
     def build(tokenProvider: TokenProvider[F]): Resource[F, TokenProvider[F]] =
-      builder(tokenProvider).resource.map(builder => TokenProvider.create(builder.value))
+      builder(tokenProvider).resource
+        .map(builder => TokenProvider.create(builder.value))
+        .map(_.withPrincipal(tokenProvider.principal))
 
     def build(tokenProvider: F[TokenProvider[F]]): Resource[F, TokenProvider[F]] =
       tokenProvider.toResource.flatMap(build)
@@ -169,8 +204,8 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
     */
-  def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
-    TokenProvider.create {
+  def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] = {
+    val fetchToken: F[AccessToken] = {
       val jwtOptions = JwtOptions(signature = false)
 
       httpClient
@@ -184,7 +219,17 @@ object TokenProvider {
         }
         .adaptError { case t => new UnableToGetToken(t) }
     }
-      .pure[F]
+
+    val fetchPrincipal =
+      httpClient
+        .googleExpect[String](uri"email")
+        .adaptError { case t => new UnableToGetToken(t) }
+        .map(Option(_))
+
+    Concurrent[F]
+      .memoize(fetchPrincipal)
+      .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+  }
 
   /** Retrieves an identity token using your user account credentials.
     *
@@ -199,7 +244,7 @@ object TokenProvider {
   def userIdentity[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
-        TokenProvider.create {
+        val fetchToken: F[AccessToken] = {
           val form = UrlForm(
             "refresh_token" -> refreshToken.value,
             "client_id"     -> clientId.value,
@@ -216,7 +261,24 @@ object TokenProvider {
             .flatMap(_.as[AccessToken](decoder).liftTo[F])
             .adaptError { case t => new UnableToGetToken(t) }
         }
-          .pure[F]
+
+        val fetchPrincipal =
+          fetchToken.map { token =>
+            val parts = token.token.value.split('.')
+
+            if (parts.length < 2) Option.empty[String]
+            else {
+              val payloadJson = new String(Base64.getUrlDecoder.decode(parts(1)), UTF_8)
+              parser
+                .parse(payloadJson)
+                .toOption
+                .flatMap(json => json.hcursor.get[String]("email").orElse(json.hcursor.get[String]("sub")).toOption)
+            }
+          }.handleError(_ => None)
+
+        Concurrent[F]
+          .memoize(fetchPrincipal)
+          .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
       case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
         new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
       case (_, None) =>
@@ -234,13 +296,20 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/compute/docs/access/authenticate-workloads
     */
-  def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] =
-    TokenProvider.create {
+  def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] = {
+    val fetchToken =
+      httpClient.googleExpect[AccessToken](uri"token").adaptError { case t => new UnableToGetToken(t) }
+
+    val fetchPrincipal =
       httpClient
-        .googleExpect[AccessToken](uri"token")
+        .googleExpect[String](uri"email")
         .adaptError { case t => new UnableToGetToken(t) }
-    }
-      .pure[F]
+        .map(Option(_))
+
+    Concurrent[F]
+      .memoize(fetchPrincipal)
+      .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+  }
 
   /** Retrieves a service account token from Google's OAuth API.
     *
@@ -272,21 +341,23 @@ object TokenProvider {
       privateKey: RSAPrivateKey,
       scope: List[String],
       httpClient: Client[F]
-  ): TokenProvider[F] = TokenProvider.create {
-    Clock[F].realTimeInstant.map { now =>
-      JWT.create
-        .withIssuedAt(Date.from(now))
-        .withExpiresAt(Date.from(now.plusMillis(1.hour.toMillis)))
-        .withAudience("https://oauth2.googleapis.com/token")
-        .withClaim("scope", scope.mkString(" "))
-        .withClaim("iss", clientEmail.value)
-        .sign(Algorithm.RSA256(privateKey))
+  ): TokenProvider[F] = TokenProvider
+    .create[F] {
+      Clock[F].realTimeInstant.map { now =>
+        JWT.create
+          .withIssuedAt(Date.from(now))
+          .withExpiresAt(Date.from(now.plusMillis(1.hour.toMillis)))
+          .withAudience("https://oauth2.googleapis.com/token")
+          .withClaim("scope", scope.mkString(" "))
+          .withClaim("iss", clientEmail.value)
+          .sign(Algorithm.RSA256(privateKey))
+      }
+        .map(token => UrlForm("grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion" -> token))
+        .map(Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(_))
+        .flatMap(httpClient.expect[AccessToken](_))
+        .adaptError { case t => new UnableToGetToken(t) }
     }
-      .map(token => UrlForm("grant_type" -> "urn:ietf:params:oauth:grant-type:jwt-bearer", "assertion" -> token))
-      .map(Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(_))
-      .flatMap(httpClient.expect[AccessToken](_))
-      .adaptError { case t => new UnableToGetToken(t) }
-  }
+    .withPrincipal(clientEmail.value)
 
   /** Retrieves a user account token from Google's OAuth API.
     *
@@ -302,7 +373,8 @@ object TokenProvider {
       httpClient: Client[F]
   ): F[TokenProvider[F]] =
     (Parser.googleClientSecrets(clientSecretsPath), Parser.googleRefreshToken(refreshTokenPath)).tupled.flatMap {
-      case ((clientId, clientSecret), token) => userAccount(clientId, clientSecret, token, httpClient)
+      case ((clientId, clientSecret), token) =>
+        userAccount(clientId, clientSecret, token, httpClient)
     }
 
   /** Retrieves a user account token from Google's OAuth API.
@@ -318,8 +390,8 @@ object TokenProvider {
       clientSecret: ClientSecret,
       refreshToken: RefreshToken,
       httpClient: Client[F]
-  ): F[TokenProvider[F]] =
-    TokenProvider.create {
+  ): F[TokenProvider[F]] = {
+    val fetchToken: F[AccessToken] = {
       val form = UrlForm(
         "refresh_token" -> refreshToken.value,
         "client_id"     -> clientId.value,
@@ -329,11 +401,20 @@ object TokenProvider {
 
       val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
 
-      httpClient
-        .expect[AccessToken](request)
-        .adaptError { case t => new UnableToGetToken(t) }
+      httpClient.expect[AccessToken](request).adaptError { case t => new UnableToGetToken(t) }
     }
-      .pure[F]
+
+    val fetchPrincipal =
+      fetchToken.flatMap { token =>
+        val request = Request[F](GET, uri"https://www.googleapis.com/oauth2/v3/userinfo").putHeaders(token.asHeader)
+
+        httpClient.expect[Json](request).map(_.hcursor.get[String]("email").toOption)
+      }.handleError(_ => None)
+
+    Concurrent[F]
+      .memoize(fetchPrincipal)
+      .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+  }
 
   /** Retrieves a user account token from Google's OAuth API using the "Application Default Credentials" file.
     *
