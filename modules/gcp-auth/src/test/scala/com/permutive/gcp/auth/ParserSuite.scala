@@ -128,12 +128,8 @@ class ParserSuite extends CatsEffectSuite {
     for {
       result <- Parser.googleServiceAccount[IO](path)
     } yield {
-      val (email, rsa) = result
-
-      val expected = ClientEmail("my@example.com")
-
-      assertEquals(email, expected)
-      assertEquals(rsa.getAlgorithm(), "RSA")
+      assertEquals(result.clientEmail, ClientEmail("my@example.com"))
+      assertEquals(result.privateKey.getAlgorithm(), "RSA")
     }
   }
 
@@ -167,9 +163,9 @@ class ParserSuite extends CatsEffectSuite {
     }
   }
 
-  //////////////////////////////////////////
-  // Parser.applicationDefaultCredentials //
-  //////////////////////////////////////////
+  ////////////////////////////////////
+  // Parser.defaultCredentialsFile  //
+  ////////////////////////////////////
 
   def fixture(resource: String) = ResourceFunFixture {
     Resource.make {
@@ -177,48 +173,58 @@ class ParserSuite extends CatsEffectSuite {
     }(userHome => IO(sys.props.put("user.home", userHome)).void)
   }
 
-  fixture("/default/valid").test("Parser.applicationDefaultCredentials should parse a valid file") { _ =>
-    val result = Parser.applicationDefaultCredentials[IO]
-
-    val expected = (
+  fixture("/default/valid").test("Parser.defaultCredentialsFile parses an authorized_user file") { _ =>
+    val expected = Parser.CredentialsFile.AuthorizedUser(
       ClientId("my-client-id"),
       ClientSecret("my-client-secret"),
       RefreshToken("refresh_token")
     )
 
-    assertIO(result, expected)
+    assertIO(Parser.defaultCredentialsFile[IO].map(_._2), Some(expected))
   }
 
-  fixture("/").test {
-    "Parser.applicationDefaultCredentials should raise a failure if the file is missing"
-  } { _ =>
-    val path            = resourcePath(".config/gcloud/application_default_credentials.json")
-    val expectedMessage = s"Attempted to parse default credentials from `$path` ended in failure"
-
-    interceptMessageIO[UnableToGetDefaultCredentials](expectedMessage) {
-      Parser.applicationDefaultCredentials[IO]
+  fixture("/default/sa-valid").test("Parser.defaultCredentialsFile parses a service_account file") { _ =>
+    Parser.defaultCredentialsFile[IO].map {
+      case (_, Some(Parser.CredentialsFile.ServiceAccount(email, key))) =>
+        assertEquals(email, ClientEmail("my@example.com"))
+        assertEquals(key.getAlgorithm(), "RSA")
+      case other =>
+        fail(s"expected Some(ServiceAccount), got: $other")
     }
   }
 
-  fixture("/default/empty").test("Parser.applicationDefaultCredentials should raise a failure if the file is empty") {
+  fixture("/").test("Parser.defaultCredentialsFile returns None when no file is present") { _ =>
+    assertIO(Parser.defaultCredentialsFile[IO].map(_._2), None)
+  }
+
+  fixture("/default/external")
+    .test("Parser.defaultCredentialsFile raises UnableToGetDefaultCredentials for an external_account file") { _ =>
+      val path            = resourcePath("default/external/.config/gcloud/application_default_credentials.json")
+      val expectedMessage = s"Attempted to parse default credentials from `$path` ended in failure"
+
+      interceptMessageIO[UnableToGetDefaultCredentials](expectedMessage) {
+        Parser.defaultCredentialsFile[IO]
+      }
+    }
+
+  fixture("/default/empty").test("Parser.defaultCredentialsFile raises UnableToGetDefaultCredentials on empty file") {
     _ =>
       val path            = resourcePath("default/empty/.config/gcloud/application_default_credentials.json")
       val expectedMessage = s"Attempted to parse default credentials from `$path` ended in failure"
 
       interceptMessageIO[UnableToGetDefaultCredentials](expectedMessage) {
-        Parser.applicationDefaultCredentials[IO]
+        Parser.defaultCredentialsFile[IO]
       }
   }
 
   fixture("/default/invalid").test(
-    "Parser.applicationDefaultCredentials should raise a failure if the file is invalid"
+    "Parser.defaultCredentialsFile raises UnableToGetDefaultCredentials on invalid file"
   ) { _ =>
-    val path = resourcePath("default/invalid/.config/gcloud/application_default_credentials.json")
-
+    val path            = resourcePath("default/invalid/.config/gcloud/application_default_credentials.json")
     val expectedMessage = s"Attempted to parse default credentials from `$path` ended in failure"
 
     interceptMessageIO[UnableToGetDefaultCredentials](expectedMessage) {
-      Parser.applicationDefaultCredentials[IO]
+      Parser.defaultCredentialsFile[IO]
     }
   }
 

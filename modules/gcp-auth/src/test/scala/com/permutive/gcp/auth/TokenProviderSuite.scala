@@ -24,8 +24,8 @@ import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all._
 
+import com.permutive.gcp.auth.errors.DefaultCredentialsFileNotFound
 import com.permutive.gcp.auth.errors.UnableToGetClientData
-import com.permutive.gcp.auth.errors.UnableToGetDefaultCredentials
 import com.permutive.gcp.auth.errors.UnableToGetToken
 import com.permutive.gcp.auth.models.AccessToken
 import com.permutive.gcp.auth.models.ClientEmail
@@ -139,7 +139,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
   } { _ =>
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    interceptIO[UnableToGetDefaultCredentials] {
+    interceptIO[DefaultCredentialsFileNotFound.type] {
       TokenProvider.userIdentity[IO](client).flatMap(_.accessToken)
     }
   }
@@ -281,7 +281,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    interceptIO[UnableToGetDefaultCredentials] {
+    interceptIO[DefaultCredentialsFileNotFound.type] {
       TokenProvider
         .userAccount[IO](client)
         .flatMap(_.accessToken)

@@ -35,8 +35,10 @@ import cats.syntax.all._
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.permutive.gcp.auth.errors.DefaultCredentialsFileNotFound
 import com.permutive.gcp.auth.errors.ExpirationNotFound
 import com.permutive.gcp.auth.errors.UnableToGetToken
+import com.permutive.gcp.auth.errors.UnsupportedCredentialsType
 import com.permutive.gcp.auth.models.AccessToken
 import com.permutive.gcp.auth.models.ClientEmail
 import com.permutive.gcp.auth.models.ClientId
@@ -195,25 +197,31 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
     */
-  def userIdentity[F[_]: Concurrent: Files](httpClient: Client[F]): F[TokenProvider[F]] =
-    Parser.applicationDefaultCredentials.map { case (clientId, clientSecret, refreshToken) =>
-      TokenProvider.create {
-        val form = UrlForm(
-          "refresh_token" -> refreshToken.value,
-          "client_id"     -> clientId.value,
-          "client_secret" -> clientSecret.value,
-          "grant_type"    -> "refresh_token"
-        )
+  def userIdentity[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
+        TokenProvider.create {
+          val form = UrlForm(
+            "refresh_token" -> refreshToken.value,
+            "client_id"     -> clientId.value,
+            "client_secret" -> clientSecret.value,
+            "grant_type"    -> "refresh_token"
+          )
 
-        val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
+          val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
 
-        val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
+          val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
 
-        httpClient
-          .expect[Json](request)
-          .flatMap(_.as[AccessToken](decoder).liftTo[F])
-          .adaptError { case t => new UnableToGetToken(t) }
-      }
+          httpClient
+            .expect[Json](request)
+            .flatMap(_.as[AccessToken](decoder).liftTo[F])
+            .adaptError { case t => new UnableToGetToken(t) }
+        }
+          .pure[F]
+      case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
+        new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
+      case (_, None) =>
+        DefaultCredentialsFileNotFound.raiseError[F, TokenProvider[F]]
     }
 
   /** Retrieves a workload service account token using Google's metadata server.
@@ -253,7 +261,7 @@ object TokenProvider {
   ): F[TokenProvider[F]] =
     Parser
       .googleServiceAccount(serviceAccountPath)
-      .map { case (clientEmail, privateKey) => serviceAccount(clientEmail, privateKey, scope, httpClient) }
+      .map(s => serviceAccount(s.clientEmail, s.privateKey, scope, httpClient))
 
   /** Retrieves a service account token from Google's OAuth API.
     *
@@ -346,9 +354,14 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/docs/authentication/provide-credentials-adc
     */
-  def userAccount[F[_]: Files: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] =
-    Parser.applicationDefaultCredentials.map { case (clientId, clientSecret, refreshToken) =>
-      userAccount(clientId, clientSecret, refreshToken, httpClient)
+  def userAccount[F[_]: Files: Async](httpClient: Client[F]): F[TokenProvider[F]] =
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
+        userAccount(clientId, clientSecret, refreshToken, httpClient).pure[F]
+      case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
+        new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
+      case (_, None) =>
+        DefaultCredentialsFileNotFound.raiseError[F, TokenProvider[F]]
     }
 
   def const[F[_]: Applicative](token: AccessToken): TokenProvider[F] = TokenProvider.create(token.pure)
