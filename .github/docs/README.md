@@ -139,6 +139,25 @@ TokenProvider.userAccount[IO](
 TokenProvider.userAccount[IO](httpClient)
 ```
 
+#### Auto-selection via Application Default Credentials
+
+`TokenProvider.auto` picks the right token provider using Google's standard
+[ADC precedence] — useful when the same binary runs locally (user account),
+in CI (service-account JSON via `GOOGLE_APPLICATION_CREDENTIALS`), and in
+production (workload identity on GCE/GKE).
+
+```scala mdoc:silent
+import com.permutive.gcp.auth.TokenProvider
+
+TokenProvider.auto[IO](httpClient)
+
+// or, with explicit scopes for the service-account JSON branch:
+TokenProvider.auto[IO](
+    scopes = "https://www.googleapis.com/auth/bigquery" :: Nil,
+    httpClient = httpClient
+)
+```
+
 ### Reading the authenticated principal
 
 Every `TokenProvider` exposes a `principal: F[Option[String]]` accessor that
@@ -271,4 +290,5 @@ val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, m
 [Google User Account Token]: https://developers.google.com/identity/protocols/OAuth2WebServer
 [Identity Token]: https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
 [instance metadata API]: https://cloud.google.com/compute/docs/access/authenticate-workloads
+[ADC precedence]: https://cloud.google.com/docs/authentication/provide-credentials-adc
 [pureconfig]: https://pureconfig.github.io

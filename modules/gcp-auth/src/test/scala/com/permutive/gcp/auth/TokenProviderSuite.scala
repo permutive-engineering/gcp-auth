@@ -27,7 +27,9 @@ import cats.syntax.all._
 
 import com.permutive.gcp.auth.errors.DefaultCredentialsFileNotFound
 import com.permutive.gcp.auth.errors.UnableToGetClientData
+import com.permutive.gcp.auth.errors.UnableToGetDefaultCredentials
 import com.permutive.gcp.auth.errors.UnableToGetToken
+import com.permutive.gcp.auth.errors.UnsupportedCredentialsType
 import com.permutive.gcp.auth.models.AccessToken
 import com.permutive.gcp.auth.models.ClientEmail
 import com.permutive.gcp.auth.models.ClientId
@@ -442,6 +444,140 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .flatMap(_.principal)
 
     assertIO(result, None)
+  }
+
+  ////////////////////////////////////
+  // TokenProvider.auto             //
+  ////////////////////////////////////
+
+  fixture("/default/valid").test("TokenProvider.auto routes to userAccount when ADC user file exists") { _ =>
+    val client = Client.from {
+      case POST -> Root / "token" =>
+        Ok(Json.obj("access_token" := "user-token", "expires_in" := 3600))
+      case req @ GET -> Root / "oauth2" / "v3" / "userinfo" if req.hasHeader("Authorization", "Bearer user-token") =>
+        Ok(Json.obj("email" := "adc-user@example.com"))
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken, provider.principal).tupled
+    }
+
+    assertIO(result, (AccessToken(Token("user-token"), ExpiresIn(3600)), Some("adc-user@example.com")))
+  }
+
+  fixture("/default/sa-valid").test("TokenProvider.auto routes to serviceAccount when ADC SA file exists") { _ =>
+    val client = Client.from { case POST -> Root / "token" =>
+      Ok(Json.obj("access_token" := "sa-token", "expires_in" := 3600))
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken, provider.principal).tupled
+    }
+
+    assertIO(result, (AccessToken(Token("sa-token"), ExpiresIn(3600)), Some("my@example.com")))
+  }
+
+  fixture("/default/missing").test("TokenProvider.auto falls back to metadata server when no ADC file is found") { _ =>
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "metadata-token", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok("metadata-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken, provider.principal).tupled
+    }
+
+    assertIO(
+      result,
+      (AccessToken(Token("metadata-token"), ExpiresIn(3600)), Some("metadata-sa@project.iam.gserviceaccount.com"))
+    )
+  }
+
+  ///////////////////////////////////////////////
+  // TokenProvider.auto (identity-token flavor) //
+  ///////////////////////////////////////////////
+
+  fixture("/default/valid").test("TokenProvider.auto(client, audience) routes to userIdentity when ADC file exists") {
+    _ =>
+      val idToken = JwtCirce.encode(JwtClaim(content = Json.obj("email" := "adc-user@example.com").noSpaces))
+
+      val client = Client.from { case POST -> Root / "token" =>
+        Ok(Json.obj("id_token" := idToken, "expires_in" := 3600))
+      }
+
+      val audience = uri"http://example.com/my-audience"
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.principal)
+
+      assertIO(result, Some("adc-user@example.com"))
+  }
+
+  fixture("/default/missing")
+    .test("TokenProvider.auto(client, audience) falls back to metadata server when no ADC file is found") { _ =>
+      val audience = uri"http://example.com/my-audience"
+
+      val expiration = Instant.now().plusSeconds(60).getEpochSecond()
+
+      val client = Client.from {
+        case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "identity"
+            if req.hasParam("audience", audience.renderString) && req.hasHeader("Metadata-Flavor", "Google") =>
+          Ok(JwtCirce.encode(JwtClaim(expiration = expiration.some)))
+        case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+            if req.hasHeader("Metadata-Flavor", "Google") =>
+          Ok("metadata-sa@project.iam.gserviceaccount.com")
+      }
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.principal)
+
+      assertIO(result, Some("metadata-sa@project.iam.gserviceaccount.com"))
+    }
+
+  fixture("/default/external")
+    .test("TokenProvider.auto raises UnableToGetDefaultCredentials for non-SA / non-user types") { _ =>
+      val client = Client.from(PartialFunction.empty)
+
+      val result = TokenProvider.auto[IO](client).flatMap(_.accessToken).attempt
+
+      result.map {
+        case Left(_: UnableToGetDefaultCredentials) => ()
+        case other                                  => fail(s"expected UnableToGetDefaultCredentials, got: $other")
+      }
+    }
+
+  fixture("/default/sa-valid")
+    .test("TokenProvider.auto(client, audience) raises UnsupportedCredentialsType for service_account") { _ =>
+      val audience = uri"http://example.com/my-audience"
+      val client   = Client.from(PartialFunction.empty)
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.accessToken).attempt
+
+      result.map {
+        case Left(_: UnsupportedCredentialsType) => ()
+        case other                               => fail(s"expected UnsupportedCredentialsType, got: $other")
+      }
+    }
+
+  fixture("/default/missing").test("TokenProvider.auto memoises principal across calls") { _ =>
+    val counter = new AtomicInteger(0)
+
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "tok", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        IO(counter.incrementAndGet()) *> Ok("metadata-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      provider.principal.replicateA(5).map(_ => counter.get())
+    }
+
+    assertIO(result, 1)
   }
 
   /////////////////////////////////////////

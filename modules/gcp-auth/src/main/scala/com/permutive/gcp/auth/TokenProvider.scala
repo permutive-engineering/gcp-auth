@@ -472,4 +472,66 @@ object TokenProvider {
 
   }
 
+  /** Default OAuth2 scope used by `auto` when none is supplied: grants access to all GCP services the underlying
+    * credentials are entitled to.
+    */
+  val DefaultScope: String = "https://www.googleapis.com/auth/cloud-platform"
+
+  /** Auto-selects an appropriate [[TokenProvider]] using Google's standard "Application Default Credentials"
+    * precedence:
+    *
+    *   1. `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to a credentials JSON file (dispatching on the JSON's
+    *      `type` field — `service_account` or `authorized_user`)
+    *   2. `~/.config/gcloud/application_default_credentials.json` (or `%AppData%/gcloud/...` on Windows)
+    *   3. The compute-engine metadata server (workload identity)
+    *
+    * Equivalent in spirit to Google's `GoogleCredentials.getApplicationDefault()`. The returned provider memoises
+    * [[TokenProvider!.principal principal]], so each instance makes at most one underlying lookup.
+    *
+    * Raises [[com.permutive.gcp.auth.errors.UnsupportedCredentialsType UnsupportedCredentialsType]] when the
+    * credentials file declares a `type` other than `service_account` or `authorized_user` (e.g. `external_account`,
+    * `impersonated_service_account`, `gdch_service_account`).
+    *
+    * @see
+    *   https://cloud.google.com/docs/authentication/provide-credentials-adc
+    */
+  def auto[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
+    auto(DefaultScope :: Nil, httpClient)
+
+  /** Same as the zero-scope `auto` overload, but with explicit OAuth2 scopes for the service-account JSON branch.
+    * Scopes are ignored when dispatching to user-account or metadata-server flows.
+    */
+  def auto[F[_]: Async: Files](scopes: List[String], httpClient: Client[F]): F[TokenProvider[F]] =
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.ServiceAccount(email, key))) =>
+        serviceAccount(email, key, scopes, httpClient).pure[F]
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, secret, refreshToken))) =>
+        userAccount(clientId, secret, refreshToken, httpClient)
+      case (_, None) =>
+        serviceAccount(httpClient)
+    }
+
+  /** Auto-selects an appropriate identity-token [[TokenProvider]] using Google's standard "Application Default
+    * Credentials" precedence:
+    *
+    *   1. `GOOGLE_APPLICATION_CREDENTIALS` env var, or `~/.config/gcloud/application_default_credentials.json` (or
+    *      `%AppData%/gcloud/...` on Windows) — uses `userIdentity` to exchange the ADC user's refresh token for an
+    *      id_token (dev-only). Requires the file to be of type `authorized_user`.
+    *   2. The compute-engine metadata server (workload identity) — uses [[identity]] for the given audience.
+    *
+    * Identity tokens via service-account JSON files are not supported by this library.
+    *
+    * Raises [[com.permutive.gcp.auth.errors.UnsupportedCredentialsType UnsupportedCredentialsType]] when the
+    * credentials file declares a `type` other than `authorized_user`.
+    */
+  def auto[F[_]: Async: Files](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, secret, refreshToken))) =>
+        userIdentity(clientId, secret, refreshToken, httpClient)
+      case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
+        new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
+      case (_, None) =>
+        identity(httpClient, audience)
+    }
+
 }
