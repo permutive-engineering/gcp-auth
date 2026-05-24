@@ -51,6 +51,7 @@ import fs2.io.file.Files
 import fs2.io.file.Path
 import io.circe.Decoder
 import io.circe.Json
+import org.http4s.EntityDecoder
 import org.http4s.Header
 import org.http4s.Method.GET
 import org.http4s.Method.POST
@@ -168,15 +169,10 @@ object TokenProvider {
     */
   def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): TokenProvider[F] =
     TokenProvider.create {
-      val uri = uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity" +?
-        ("audience" -> audience)
-
-      val request = Request[F](GET, uri).putHeaders(Header.Raw(ci"Metadata-Flavor", "Google"))
-
       val jwtOptions = JwtOptions(signature = false)
 
       httpClient
-        .expect[String](request)
+        .googleExpect[String](uri"identity" +? ("audience" -> audience))
         .mproduct(JwtCirce.decode(_, jwtOptions).toEither.flatMap(_.expiration.toRight(ExpirationNotFound)).liftTo[F])
         .flatMap { case (token, expiration) =>
           Clock[F].realTimeInstant
@@ -237,12 +233,8 @@ object TokenProvider {
     */
   def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): TokenProvider[F] =
     TokenProvider.create {
-      val request =
-        Request[F](GET, uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token")
-          .putHeaders(Header.Raw(ci"Metadata-Flavor", "Google"))
-
       httpClient
-        .expect[AccessToken](request)
+        .googleExpect[AccessToken](uri"token")
         .adaptError { case t => new UnableToGetToken(t) }
     }
 
@@ -365,5 +357,15 @@ object TokenProvider {
     }
 
   def const[F[_]: Applicative](token: AccessToken): TokenProvider[F] = TokenProvider.create(token.pure)
+
+  implicit final private class GoogleRequestOps[F[_]](private val httpClient: Client[F]) extends AnyVal {
+
+    def googleExpect[A](uri: Uri)(implicit decoder: EntityDecoder[F, A]): F[A] = {
+      val baseUri = uri"http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/"
+
+      httpClient.expect[A](Request[F](GET, baseUri.resolve(uri)).putHeaders(Header.Raw(ci"Metadata-Flavor", "Google")))
+    }
+
+  }
 
 }
