@@ -78,10 +78,9 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(JwtCirce.encode(JwtClaim(expiration = expiration.some)))
     }
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
-
     for {
-      token <- tokenProvider.accessToken
+      tokenProvider <- TokenProvider.identity[IO](client, audience)
+      token         <- tokenProvider.accessToken
     } yield {
       assert(token.token.value.nonEmpty)
       assert(token.expiresIn.value <= 60)
@@ -97,10 +96,8 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(JwtCirce.encode(JwtClaim()))
     }
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
-
     interceptIO[UnableToGetToken] {
-      tokenProvider.accessToken
+      TokenProvider.identity[IO](client, audience).flatMap(_.accessToken)
     }
   }
 
@@ -109,9 +106,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
-
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+    interceptIO[UnableToGetToken](TokenProvider.identity[IO](client, audience).flatMap(_.accessToken))
   }
 
   ////////////////////////////
@@ -155,9 +150,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    val tokenProvider = TokenProvider.serviceAccount[IO](client)
-
-    val result = tokenProvider.accessToken
+    val result = TokenProvider.serviceAccount[IO](client).flatMap(_.accessToken)
 
     assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
   }
@@ -165,9 +158,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
   test("TokenProvider.serviceAccount(Client) returns an error on any failure") {
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider.serviceAccount[IO](client)
-
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+    interceptIO[UnableToGetToken](TokenProvider.serviceAccount[IO](client).flatMap(_.accessToken))
   }
 
   //////////////////////////////////////////////////////////////
@@ -297,10 +288,9 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    val tokenProvider = TokenProvider
+    val result = TokenProvider
       .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
-
-    val result = tokenProvider.accessToken
+      .flatMap(_.accessToken)
 
     assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
   }
@@ -308,10 +298,11 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
   test("TokenProvider.userAccount(ClientId, ClientSecret, RefreshToken, Client) retuns an error on any failure") {
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider
-      .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
-
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+    interceptIO[UnableToGetToken] {
+      TokenProvider
+        .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
+        .flatMap(_.accessToken)
+    }
   }
 
   ///////////////////////////////////////////////////

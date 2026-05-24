@@ -44,7 +44,7 @@ sealed trait TokenType {
     */
   def tokenProvider[F[_]: Files: Async](httpClient: Client[F]): F[TokenProvider[F]] = this match {
     case TokenType.UserAccount    => TokenProvider.userAccount[F](httpClient)
-    case TokenType.ServiceAccount => TokenProvider.serviceAccount[F](httpClient).pure[F]
+    case TokenType.ServiceAccount => TokenProvider.serviceAccount[F](httpClient)
     case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
   }
 
@@ -59,7 +59,7 @@ sealed trait TokenType {
   def identityTokenProvider[F[_]: Files: Async](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
     this match {
       case TokenType.UserAccount    => TokenProvider.userIdentity[F](httpClient)
-      case TokenType.ServiceAccount => TokenProvider.identity[F](httpClient, audience).pure[F]
+      case TokenType.ServiceAccount => TokenProvider.identity[F](httpClient, audience)
       case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
     }
 

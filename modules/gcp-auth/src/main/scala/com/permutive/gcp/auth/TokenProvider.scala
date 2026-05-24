@@ -169,7 +169,7 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
     */
-  def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): TokenProvider[F] =
+  def identity[F[_]: Concurrent: Clock](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
     TokenProvider.create {
       val jwtOptions = JwtOptions(signature = false)
 
@@ -184,6 +184,7 @@ object TokenProvider {
         }
         .adaptError { case t => new UnableToGetToken(t) }
     }
+      .pure[F]
 
   /** Retrieves an identity token using your user account credentials.
     *
@@ -233,12 +234,13 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/compute/docs/access/authenticate-workloads
     */
-  def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): TokenProvider[F] =
+  def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] =
     TokenProvider.create {
       httpClient
         .googleExpect[AccessToken](uri"token")
         .adaptError { case t => new UnableToGetToken(t) }
     }
+      .pure[F]
 
   /** Retrieves a service account token from Google's OAuth API.
     *
@@ -299,9 +301,8 @@ object TokenProvider {
       refreshTokenPath: Path,
       httpClient: Client[F]
   ): F[TokenProvider[F]] =
-    (Parser.googleClientSecrets(clientSecretsPath), Parser.googleRefreshToken(refreshTokenPath)).mapN {
-      case ((clientId, clientSecret), token) =>
-        userAccount(clientId, clientSecret, token, httpClient)
+    (Parser.googleClientSecrets(clientSecretsPath), Parser.googleRefreshToken(refreshTokenPath)).tupled.flatMap {
+      case ((clientId, clientSecret), token) => userAccount(clientId, clientSecret, token, httpClient)
     }
 
   /** Retrieves a user account token from Google's OAuth API.
@@ -317,7 +318,7 @@ object TokenProvider {
       clientSecret: ClientSecret,
       refreshToken: RefreshToken,
       httpClient: Client[F]
-  ): TokenProvider[F] =
+  ): F[TokenProvider[F]] =
     TokenProvider.create {
       val form = UrlForm(
         "refresh_token" -> refreshToken.value,
@@ -332,6 +333,7 @@ object TokenProvider {
         .expect[AccessToken](request)
         .adaptError { case t => new UnableToGetToken(t) }
     }
+      .pure[F]
 
   /** Retrieves a user account token from Google's OAuth API using the "Application Default Credentials" file.
     *
@@ -351,7 +353,7 @@ object TokenProvider {
   def userAccount[F[_]: Files: Async](httpClient: Client[F]): F[TokenProvider[F]] =
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
-        userAccount(clientId, clientSecret, refreshToken, httpClient).pure[F]
+        userAccount(clientId, clientSecret, refreshToken, httpClient)
       case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
         new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
       case (_, None) =>
