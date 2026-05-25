@@ -63,6 +63,7 @@ import org.http4s.Uri
 import org.http4s.UrlForm
 import org.http4s.circe._
 import org.http4s.client.Client
+import org.http4s.jdkhttpclient.JdkHttpClient
 import org.http4s.syntax.all._
 import org.typelevel.ci._
 import pdi.jwt.JwtCirce
@@ -533,5 +534,23 @@ object TokenProvider {
       case (_, None) =>
         identity(httpClient, audience)
     }
+
+  /** Same as `auto(httpClient)` but allocates a default [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]]
+    * internally and returns the result as a `Resource` so the client is released alongside the provider.
+    */
+  def auto[F[_]: Async: Files]: Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F])
+
+  /** Same as `auto(scopes, httpClient)` but allocates a default
+    * [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]] internally.
+    */
+  def auto[F[_]: Async: Files](scopes: List[String]): Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F](scopes, _))
+
+  /** Same as `auto(httpClient, audience)` but allocates a default
+    * [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]] internally.
+    */
+  def auto[F[_]: Async: Files](audience: Uri): Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F](_, audience))
 
 }
