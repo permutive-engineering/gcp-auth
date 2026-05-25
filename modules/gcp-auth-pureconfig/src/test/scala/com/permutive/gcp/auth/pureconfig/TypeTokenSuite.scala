@@ -20,7 +20,6 @@ import cats.effect.IO
 import cats.effect.Resource
 
 import com.permutive.gcp.auth.models.AccessToken
-import com.permutive.gcp.auth.models.ExpiresIn
 import com.permutive.gcp.auth.models.Token
 import io.circe.Json
 import io.circe.syntax._
@@ -49,7 +48,7 @@ class TypeTokenSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .tokenProvider(client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenType.ServiceAccount can be loaded from configuration") {
@@ -66,7 +65,7 @@ class TypeTokenSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .tokenProvider(client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenType.NoOp can be loaded from configuration") {

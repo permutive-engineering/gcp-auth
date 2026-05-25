@@ -34,7 +34,6 @@ import com.permutive.gcp.auth.models.AccessToken
 import com.permutive.gcp.auth.models.ClientEmail
 import com.permutive.gcp.auth.models.ClientId
 import com.permutive.gcp.auth.models.ClientSecret
-import com.permutive.gcp.auth.models.ExpiresIn
 import com.permutive.gcp.auth.models.RefreshToken
 import com.permutive.gcp.auth.models.Token
 import fs2.Stream
@@ -86,7 +85,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       token         <- tokenProvider.accessToken
     } yield {
       assert(token.token.value.nonEmpty)
-      assert(token.expiresIn.value <= 60)
+      assertEquals(token.expiresAt, Instant.ofEpochSecond(expiration))
     }
   }
 
@@ -140,9 +139,13 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     for {
       tokenProvider <- TokenProvider.userIdentity[IO](client)
       token         <- tokenProvider.accessToken
+      now           <- IO.realTimeInstant
     } yield {
       assert(token.token.value.nonEmpty)
-      assertEquals(token.expiresIn.value, 3600L)
+      assert(
+        token.expiresAt.isAfter(now.plusSeconds(3598)) && token.expiresAt.isBefore(now.plusSeconds(3601)),
+        s"expected expiresAt ~3600s from now, got: ${token.expiresAt}"
+      )
     }
   }
 
@@ -183,7 +186,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
     val result = TokenProvider.serviceAccount[IO](client).flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.serviceAccount(Client) returns an error on any failure") {
@@ -207,7 +210,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .serviceAccount[IO](path, "scope_1" :: "scope_2" :: Nil, client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.serviceAccount(Path, List[String], Client) returns an error on any failure") {
@@ -262,7 +265,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
     val result = tokenProvider.accessToken
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test {
@@ -293,7 +296,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .userAccount[IO](client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   fixture("/").test {
@@ -323,7 +326,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.userAccount(ClientId, ClientSecret, RefreshToken, Client) retuns an error on any failure") {
@@ -352,7 +355,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .userAccount[IO](clientSecretsPath, refreshTokenPath, client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.userAccount(Path, Path, Client) retuns an error on any failure") {
@@ -459,10 +462,10 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     }
 
     val result = TokenProvider.auto[IO](client).flatMap { provider =>
-      (provider.accessToken, provider.principal).tupled
+      (provider.accessToken.map(_.token), provider.principal).tupled
     }
 
-    assertIO(result, (AccessToken(Token("user-token"), ExpiresIn(3600)), Some("adc-user@example.com")))
+    assertIO(result, (Token("user-token"), Some("adc-user@example.com")))
   }
 
   fixture("/default/sa-valid").test("TokenProvider.auto routes to serviceAccount when ADC SA file exists") { _ =>
@@ -471,10 +474,10 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     }
 
     val result = TokenProvider.auto[IO](client).flatMap { provider =>
-      (provider.accessToken, provider.principal).tupled
+      (provider.accessToken.map(_.token), provider.principal).tupled
     }
 
-    assertIO(result, (AccessToken(Token("sa-token"), ExpiresIn(3600)), Some("my@example.com")))
+    assertIO(result, (Token("sa-token"), Some("my@example.com")))
   }
 
   fixture("/default/missing").test("TokenProvider.auto falls back to metadata server when no ADC file is found") { _ =>
@@ -488,13 +491,10 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     }
 
     val result = TokenProvider.auto[IO](client).flatMap { provider =>
-      (provider.accessToken, provider.principal).tupled
+      (provider.accessToken.map(_.token), provider.principal).tupled
     }
 
-    assertIO(
-      result,
-      (AccessToken(Token("metadata-token"), ExpiresIn(3600)), Some("metadata-sa@project.iam.gserviceaccount.com"))
-    )
+    assertIO(result, (Token("metadata-token"), Some("metadata-sa@project.iam.gserviceaccount.com")))
   }
 
   ///////////////////////////////////////////////
