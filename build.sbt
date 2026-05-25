@@ -9,11 +9,15 @@ addCommandAlias("ci-publish", "versionCheck; github; ci-release")
 
 lazy val documentation = project
   .enablePlugins(MdocPlugin)
-  .dependsOn(`gcp-auth`, `gcp-auth-pureconfig`)
+  .dependsOn(`gcp-auth`, `gcp-auth-pureconfig`, `gcp-auth-kafka`)
 
 lazy val `gcp-auth` = module
   .settings(Test / fork := true)
 
 lazy val `gcp-auth-pureconfig` = module
+  .settings(Test / fork := true)
+  .dependsOn(`gcp-auth`)
+
+lazy val `gcp-auth-kafka` = module
   .settings(Test / fork := true)
   .dependsOn(`gcp-auth`)
