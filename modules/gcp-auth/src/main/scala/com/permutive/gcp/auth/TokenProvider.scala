@@ -244,46 +244,65 @@ object TokenProvider {
   def userIdentity[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
-        val fetchToken: F[AccessToken] = {
-          val form = UrlForm(
-            "refresh_token" -> refreshToken.value,
-            "client_id"     -> clientId.value,
-            "client_secret" -> clientSecret.value,
-            "grant_type"    -> "refresh_token"
-          )
-
-          val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
-
-          val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
-
-          httpClient
-            .expect[Json](request)
-            .flatMap(_.as[AccessToken](decoder).liftTo[F])
-            .adaptError { case t => new UnableToGetToken(t) }
-        }
-
-        val fetchPrincipal =
-          fetchToken.map { token =>
-            val parts = token.token.value.split('.')
-
-            if (parts.length < 2) Option.empty[String]
-            else {
-              val payloadJson = new String(Base64.getUrlDecoder.decode(parts(1)), UTF_8)
-              parser
-                .parse(payloadJson)
-                .toOption
-                .flatMap(json => json.hcursor.get[String]("email").orElse(json.hcursor.get[String]("sub")).toOption)
-            }
-          }.handleError(_ => None)
-
-        Concurrent[F]
-          .memoize(fetchPrincipal)
-          .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+        userIdentity(clientId, clientSecret, refreshToken, httpClient)
       case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
         new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
       case (_, None) =>
         DefaultCredentialsFileNotFound.raiseError[F, TokenProvider[F]]
     }
+
+  /** Retrieves an identity token from Google's OAuth API by exchanging an explicit user-account refresh token.
+    *
+    * Identity tokens can be used for calling Cloud Run services.
+    *
+    * '''Warning!''' Be sure to keep these tokens secure, and never use them in a production environment. They are meant
+    * to be used during development only.
+    *
+    * @see
+    *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
+    */
+  def userIdentity[F[_]: Concurrent](
+      clientId: ClientId,
+      clientSecret: ClientSecret,
+      refreshToken: RefreshToken,
+      httpClient: Client[F]
+  ): F[TokenProvider[F]] = {
+    val fetchToken: F[AccessToken] = {
+      val form = UrlForm(
+        "refresh_token" -> refreshToken.value,
+        "client_id"     -> clientId.value,
+        "client_secret" -> clientSecret.value,
+        "grant_type"    -> "refresh_token"
+      )
+
+      val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
+
+      val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
+
+      httpClient
+        .expect[Json](request)
+        .flatMap(_.as[AccessToken](decoder).liftTo[F])
+        .adaptError { case t => new UnableToGetToken(t) }
+    }
+
+    val fetchPrincipal =
+      fetchToken.map { token =>
+        val parts = token.token.value.split('.')
+
+        if (parts.length < 2) Option.empty[String]
+        else {
+          val payloadJson = new String(Base64.getUrlDecoder.decode(parts(1)), UTF_8)
+          parser
+            .parse(payloadJson)
+            .toOption
+            .flatMap(json => json.hcursor.get[String]("email").orElse(json.hcursor.get[String]("sub")).toOption)
+        }
+      }.handleError(_ => None)
+
+    Concurrent[F]
+      .memoize(fetchPrincipal)
+      .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+  }
 
   /** Retrieves a workload service account token using Google's metadata server.
     *

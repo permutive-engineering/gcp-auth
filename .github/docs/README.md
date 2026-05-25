@@ -150,8 +150,11 @@ returns the subject identifier the provider is authenticated as:
 - **User-account flows** do a best-effort call to Google's `userinfo`
   endpoint and return `None` if the call fails (the refresh token may have
   been issued with scopes that don't include `email`/`openid`/`profile`).
-- **Identity-token flows** decode the issued JWT and return its `email`
-  (falling back to `sub`) claim, or `None` if neither is present.
+- **`identity` (workload identity token)** hits the GCE metadata server's
+  `/email` endpoint, mirroring the service-account workload flow.
+- **`userIdentity` (user-account identity token)** decodes the issued JWT
+  and returns its `email` claim (falling back to `sub`), or `None` if
+  neither is present.
 - `TokenProvider.const` and `TokenProvider.create` return `None`.
 
 Factories that need an HTTP call to resolve the principal memoise the
