@@ -26,11 +26,13 @@ import java.util.Date
 import scala.concurrent.duration._
 
 import cats.Applicative
+import cats.data.OptionT
 import cats.effect.Async
 import cats.effect.Clock
 import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
 import cats.effect.Resource
+import cats.effect.Sync
 import cats.effect.Temporal
 import cats.effect.syntax.all._
 import cats.syntax.all._
@@ -473,6 +475,21 @@ object TokenProvider {
 
   }
 
+  /** Short-circuit hook used by every `auto` overload. Reads the `gcp.auth.disable` JVM system property first, falling
+    * back to the `GCP_AUTH_DISABLE` environment variable. When either is set to a case-insensitive `"true"`, returns a
+    * no-op provider backed by [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]] without evaluating
+    * `fallback` — so no filesystem reads, no metadata-server probes, no HTTP calls. Otherwise delegates to `fallback`.
+    *
+    * Intended for acceptance tests that need to silence credential resolution without otherwise touching the
+    * application wiring. See the Scaladoc on [[auto]] for the trade-off (a stray production setting silently produces a
+    * no-op provider).
+    */
+  private def disabledOr[F[_]: Sync](fallback: F[TokenProvider[F]]): F[TokenProvider[F]] =
+    OptionT(Sync[F].delay(sys.props.get("gcp.auth.disable")))
+      .orElse(OptionT(Sync[F].delay(sys.env.get("GCP_AUTH_DISABLE"))))
+      .exists(_.equalsIgnoreCase("true"))
+      .ifM(TokenProvider.const[F](AccessToken.noop).pure[F], fallback)
+
   /** Default OAuth2 scope used by `auto` when none is supplied: grants access to all GCP services the underlying
     * credentials are entitled to.
     */
@@ -493,6 +510,10 @@ object TokenProvider {
     * credentials file declares a `type` other than `service_account` or `authorized_user` (e.g. `external_account`,
     * `impersonated_service_account`, `gdch_service_account`).
     *
+    * Honors `GCP_AUTH_DISABLE=true` or `gcp.auth.disable=true` environment variables or system properties. When either
+    * is set, every overload returns [[const]] of [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]]
+    * without doing any I/O.
+    *
     * @see
     *   https://cloud.google.com/docs/authentication/provide-credentials-adc
     */
@@ -502,7 +523,7 @@ object TokenProvider {
   /** Same as the zero-scope `auto` overload, but with explicit OAuth2 scopes for the service-account JSON branch.
     * Scopes are ignored when dispatching to user-account or metadata-server flows.
     */
-  def auto[F[_]: Async: Files](scopes: List[String], httpClient: Client[F]): F[TokenProvider[F]] =
+  def auto[F[_]: Async: Files](scopes: List[String], httpClient: Client[F]): F[TokenProvider[F]] = disabledOr[F] {
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.ServiceAccount(email, key))) =>
         serviceAccount(email, key, scopes, httpClient).pure[F]
@@ -511,6 +532,7 @@ object TokenProvider {
       case (_, None) =>
         serviceAccount(httpClient)
     }
+  }
 
   /** Auto-selects an appropriate identity-token [[TokenProvider]] using Google's standard "Application Default
     * Credentials" precedence:
@@ -524,8 +546,10 @@ object TokenProvider {
     *
     * Raises [[com.permutive.gcp.auth.errors.UnsupportedCredentialsType UnsupportedCredentialsType]] when the
     * credentials file declares a `type` other than `authorized_user`.
+    *
+    * Honors `GCP_AUTH_DISABLE=true` or `gcp.auth.disable=true` environment variables or system properties.
     */
-  def auto[F[_]: Async: Files](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
+  def auto[F[_]: Async: Files](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] = disabledOr[F] {
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, secret, refreshToken))) =>
         userIdentity(clientId, secret, refreshToken, httpClient)
@@ -534,6 +558,7 @@ object TokenProvider {
       case (_, None) =>
         identity(httpClient, audience)
     }
+  }
 
   /** Same as `auto(httpClient)` but allocates a default [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]]
     * internally and returns the result as a `Resource` so the client is released alongside the provider.

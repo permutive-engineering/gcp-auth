@@ -561,6 +561,33 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       }
     }
 
+  /////////////////////////////////////
+  // TokenProvider.auto disable      //
+  /////////////////////////////////////
+
+  def disableFixture = ResourceFunFixture {
+    Resource.make(IO(sys.props.put("gcp.auth.disable", "true")).void)(_ =>
+      IO(sys.props.remove("gcp.auth.disable")).void
+    )
+  }
+
+  disableFixture.test("TokenProvider.auto(client) short-circuits to AccessToken.noop when disabled") { _ =>
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    assertIO(TokenProvider.auto[IO](client).flatMap(_.accessToken), AccessToken.noop)
+  }
+
+  disableFixture.test("TokenProvider.auto(client, audience) short-circuits to AccessToken.noop when disabled") { _ =>
+    val client   = Client.fromHttpApp(HttpApp.notFound[IO])
+    val audience = uri"http://example.com/my-audience"
+
+    assertIO(TokenProvider.auto[IO](client, audience).flatMap(_.accessToken), AccessToken.noop)
+  }
+
+  disableFixture.test("argless TokenProvider.auto[IO] short-circuits without allocating a JdkHttpClient") { _ =>
+    assertIO(TokenProvider.auto[IO].use(_.accessToken), AccessToken.noop)
+  }
+
   fixture("/default/missing").test("TokenProvider.auto memoises principal across calls") { _ =>
     val counter = new AtomicInteger(0)
 

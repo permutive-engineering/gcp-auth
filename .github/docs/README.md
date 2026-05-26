@@ -158,6 +158,22 @@ TokenProvider.auto[IO](
 )
 ```
 
+##### Disabling `auto` in acceptance tests
+
+Setting the `GCP_AUTH_DISABLE=true` environment variable (or the
+equivalent `gcp.auth.disable=true` JVM system property) makes every
+`TokenProvider.auto` overload short-circuit to
+`TokenProvider.const(AccessToken.noop)` — no filesystem reads, no
+metadata-server probes. Useful for acceptance tests that need to
+silence credential resolution without otherwise touching the
+application wiring.
+
+**Caveat:** a stray production setting will silently produce a no-op
+provider instead of a loud "credentials not found" error. When the
+configuration channel can be controlled per environment, prefer the
+`gcp-auth-pureconfig` integration with `TokenType.NoOp` selected via
+`application.conf`.
+
 ### Reading the authenticated principal
 
 Every `TokenProvider` exposes a `principal: F[Option[String]]` accessor that
