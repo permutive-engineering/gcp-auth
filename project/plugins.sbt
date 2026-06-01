@@ -6,7 +6,7 @@ addSbtPlugin("com.alejandrohdezma"               % "sbt-github-header"     % "0.
 addSbtPlugin("com.alejandrohdezma"               % "sbt-scalafix-defaults" % "0.15.0")
 addSbtPlugin("com.alejandrohdezma"               % "sbt-scalafmt-defaults" % "0.9.2")
 addSbtPlugin("com.alejandrohdezma"               % "sbt-mdoc-toc"          % "0.5.0")
-addSbtPlugin("com.alejandrohdezma"               % "sbt-modules"           % "0.4.1")
+addSbtPlugin("com.alejandrohdezma"               % "sbt-modules"           % "0.5.0")
 addSbtPlugin("com.thoughtworks.sbt-api-mappings" % "sbt-api-mappings"      % "3.0.2")
 addSbtPlugin("com.github.sbt"                    % "sbt-ci-release"        % "1.11.2")
 addSbtPlugin("com.github.sbt"                    % "sbt-header"            % "5.11.0")
