@@ -26,11 +26,13 @@ import java.util.Date
 import scala.concurrent.duration._
 
 import cats.Applicative
+import cats.data.OptionT
 import cats.effect.Async
 import cats.effect.Clock
 import cats.effect.Concurrent
 import cats.effect.MonadCancelThrow
 import cats.effect.Resource
+import cats.effect.Sync
 import cats.effect.Temporal
 import cats.effect.syntax.all._
 import cats.syntax.all._
@@ -63,6 +65,7 @@ import org.http4s.Uri
 import org.http4s.UrlForm
 import org.http4s.circe._
 import org.http4s.client.Client
+import org.http4s.jdkhttpclient.JdkHttpClient
 import org.http4s.syntax.all._
 import org.typelevel.ci._
 import pdi.jwt.JwtCirce
@@ -244,46 +247,65 @@ object TokenProvider {
   def userIdentity[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
     Parser.defaultCredentialsFile[F].flatMap {
       case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, clientSecret, refreshToken))) =>
-        val fetchToken: F[AccessToken] = {
-          val form = UrlForm(
-            "refresh_token" -> refreshToken.value,
-            "client_id"     -> clientId.value,
-            "client_secret" -> clientSecret.value,
-            "grant_type"    -> "refresh_token"
-          )
-
-          val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
-
-          val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
-
-          httpClient
-            .expect[Json](request)
-            .flatMap(_.as[AccessToken](decoder).liftTo[F])
-            .adaptError { case t => new UnableToGetToken(t) }
-        }
-
-        val fetchPrincipal =
-          fetchToken.map { token =>
-            val parts = token.token.value.split('.')
-
-            if (parts.length < 2) Option.empty[String]
-            else {
-              val payloadJson = new String(Base64.getUrlDecoder.decode(parts(1)), UTF_8)
-              parser
-                .parse(payloadJson)
-                .toOption
-                .flatMap(json => json.hcursor.get[String]("email").orElse(json.hcursor.get[String]("sub")).toOption)
-            }
-          }.handleError(_ => None)
-
-        Concurrent[F]
-          .memoize(fetchPrincipal)
-          .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+        userIdentity(clientId, clientSecret, refreshToken, httpClient)
       case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
         new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
       case (_, None) =>
         DefaultCredentialsFileNotFound.raiseError[F, TokenProvider[F]]
     }
+
+  /** Retrieves an identity token from Google's OAuth API by exchanging an explicit user-account refresh token.
+    *
+    * Identity tokens can be used for calling Cloud Run services.
+    *
+    * '''Warning!''' Be sure to keep these tokens secure, and never use them in a production environment. They are meant
+    * to be used during development only.
+    *
+    * @see
+    *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
+    */
+  def userIdentity[F[_]: Concurrent](
+      clientId: ClientId,
+      clientSecret: ClientSecret,
+      refreshToken: RefreshToken,
+      httpClient: Client[F]
+  ): F[TokenProvider[F]] = {
+    val fetchToken: F[AccessToken] = {
+      val form = UrlForm(
+        "refresh_token" -> refreshToken.value,
+        "client_id"     -> clientId.value,
+        "client_secret" -> clientSecret.value,
+        "grant_type"    -> "refresh_token"
+      )
+
+      val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
+
+      val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
+
+      httpClient
+        .expect[Json](request)
+        .flatMap(_.as[AccessToken](decoder).liftTo[F])
+        .adaptError { case t => new UnableToGetToken(t) }
+    }
+
+    val fetchPrincipal =
+      fetchToken.map { token =>
+        val parts = token.token.value.split('.')
+
+        if (parts.length < 2) Option.empty[String]
+        else {
+          val payloadJson = new String(Base64.getUrlDecoder.decode(parts(1)), UTF_8)
+          parser
+            .parse(payloadJson)
+            .toOption
+            .flatMap(json => json.hcursor.get[String]("email").orElse(json.hcursor.get[String]("sub")).toOption)
+        }
+      }.handleError(_ => None)
+
+    Concurrent[F]
+      .memoize(fetchPrincipal)
+      .map(TokenProvider.create[F](fetchToken).withPrincipal(_))
+  }
 
   /** Retrieves a workload service account token using Google's metadata server.
     *
@@ -452,5 +474,108 @@ object TokenProvider {
     }
 
   }
+
+  /** Short-circuit hook used by every `auto` overload. Reads the `gcp.auth.disable` JVM system property first, falling
+    * back to the `GCP_AUTH_DISABLE` environment variable. When either is set to a case-insensitive `"true"`, returns a
+    * no-op provider backed by [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]] without evaluating
+    * `fallback` — so no filesystem reads, no metadata-server probes, no HTTP calls. Otherwise delegates to `fallback`.
+    *
+    * Intended for acceptance tests that need to silence credential resolution without otherwise touching the
+    * application wiring. See the Scaladoc on [[auto]] for the trade-off (a stray production setting silently produces a
+    * no-op provider).
+    */
+  private def disabledOr[F[_]: Sync](fallback: F[TokenProvider[F]]): F[TokenProvider[F]] =
+    OptionT(Sync[F].delay(sys.props.get("gcp.auth.disable")))
+      .orElse(OptionT(Sync[F].delay(sys.env.get("GCP_AUTH_DISABLE"))))
+      .exists(_.equalsIgnoreCase("true"))
+      .ifM(TokenProvider.const[F](AccessToken.noop).pure[F], fallback)
+
+  /** Default OAuth2 scope used by `auto` when none is supplied: grants access to all GCP services the underlying
+    * credentials are entitled to.
+    */
+  val DefaultScope: String = "https://www.googleapis.com/auth/cloud-platform"
+
+  /** Auto-selects an appropriate [[TokenProvider]] using Google's standard "Application Default Credentials"
+    * precedence:
+    *
+    *   1. `GOOGLE_APPLICATION_CREDENTIALS` env var pointing to a credentials JSON file (dispatching on the JSON's
+    *      `type` field — `service_account` or `authorized_user`)
+    *   2. `~/.config/gcloud/application_default_credentials.json` (or `%AppData%/gcloud/...` on Windows)
+    *   3. The compute-engine metadata server (workload identity)
+    *
+    * Equivalent in spirit to Google's `GoogleCredentials.getApplicationDefault()`. The returned provider memoises
+    * [[TokenProvider!.principal principal]], so each instance makes at most one underlying lookup.
+    *
+    * Raises [[com.permutive.gcp.auth.errors.UnsupportedCredentialsType UnsupportedCredentialsType]] when the
+    * credentials file declares a `type` other than `service_account` or `authorized_user` (e.g. `external_account`,
+    * `impersonated_service_account`, `gdch_service_account`).
+    *
+    * Honors `GCP_AUTH_DISABLE=true` or `gcp.auth.disable=true` environment variables or system properties. When either
+    * is set, every overload returns [[const]] of [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]]
+    * without doing any I/O.
+    *
+    * @see
+    *   https://cloud.google.com/docs/authentication/provide-credentials-adc
+    */
+  def auto[F[_]: Async: Files](httpClient: Client[F]): F[TokenProvider[F]] =
+    auto(DefaultScope :: Nil, httpClient)
+
+  /** Same as the zero-scope `auto` overload, but with explicit OAuth2 scopes for the service-account JSON branch.
+    * Scopes are ignored when dispatching to user-account or metadata-server flows.
+    */
+  def auto[F[_]: Async: Files](scopes: List[String], httpClient: Client[F]): F[TokenProvider[F]] = disabledOr[F] {
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.ServiceAccount(email, key))) =>
+        serviceAccount(email, key, scopes, httpClient).pure[F]
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, secret, refreshToken))) =>
+        userAccount(clientId, secret, refreshToken, httpClient)
+      case (_, None) =>
+        serviceAccount(httpClient)
+    }
+  }
+
+  /** Auto-selects an appropriate identity-token [[TokenProvider]] using Google's standard "Application Default
+    * Credentials" precedence:
+    *
+    *   1. `GOOGLE_APPLICATION_CREDENTIALS` env var, or `~/.config/gcloud/application_default_credentials.json` (or
+    *      `%AppData%/gcloud/...` on Windows) — uses `userIdentity` to exchange the ADC user's refresh token for an
+    *      id_token (dev-only). Requires the file to be of type `authorized_user`.
+    *   2. The compute-engine metadata server (workload identity) — uses [[identity]] for the given audience.
+    *
+    * Identity tokens via service-account JSON files are not supported by this library.
+    *
+    * Raises [[com.permutive.gcp.auth.errors.UnsupportedCredentialsType UnsupportedCredentialsType]] when the
+    * credentials file declares a `type` other than `authorized_user`.
+    *
+    * Honors `GCP_AUTH_DISABLE=true` or `gcp.auth.disable=true` environment variables or system properties.
+    */
+  def auto[F[_]: Async: Files](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] = disabledOr[F] {
+    Parser.defaultCredentialsFile[F].flatMap {
+      case (_, Some(Parser.CredentialsFile.AuthorizedUser(clientId, secret, refreshToken))) =>
+        userIdentity(clientId, secret, refreshToken, httpClient)
+      case (path, Some(_: Parser.CredentialsFile.ServiceAccount)) =>
+        new UnsupportedCredentialsType(path, "service_account").raiseError[F, TokenProvider[F]]
+      case (_, None) =>
+        identity(httpClient, audience)
+    }
+  }
+
+  /** Same as `auto(httpClient)` but allocates a default [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]]
+    * internally and returns the result as a `Resource` so the client is released alongside the provider.
+    */
+  def auto[F[_]: Async: Files]: Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F])
+
+  /** Same as `auto(scopes, httpClient)` but allocates a default
+    * [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]] internally.
+    */
+  def auto[F[_]: Async: Files](scopes: List[String]): Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F](scopes, _))
+
+  /** Same as `auto(httpClient, audience)` but allocates a default
+    * [[org.http4s.jdkhttpclient.JdkHttpClient JdkHttpClient]] internally.
+    */
+  def auto[F[_]: Async: Files](audience: Uri): Resource[F, TokenProvider[F]] =
+    JdkHttpClient.simple[F].evalMap(auto[F](_, audience))
 
 }

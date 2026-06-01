@@ -139,6 +139,41 @@ TokenProvider.userAccount[IO](
 TokenProvider.userAccount[IO](httpClient)
 ```
 
+#### Auto-selection via Application Default Credentials
+
+`TokenProvider.auto` picks the right token provider using Google's standard
+[ADC precedence] — useful when the same binary runs locally (user account),
+in CI (service-account JSON via `GOOGLE_APPLICATION_CREDENTIALS`), and in
+production (workload identity on GCE/GKE).
+
+```scala mdoc:silent
+import com.permutive.gcp.auth.TokenProvider
+
+TokenProvider.auto[IO](httpClient)
+
+// or, with explicit scopes for the service-account JSON branch:
+TokenProvider.auto[IO](
+    scopes = "https://www.googleapis.com/auth/bigquery" :: Nil,
+    httpClient = httpClient
+)
+```
+
+##### Disabling `auto` in acceptance tests
+
+Setting the `GCP_AUTH_DISABLE=true` environment variable (or the
+equivalent `gcp.auth.disable=true` JVM system property) makes every
+`TokenProvider.auto` overload short-circuit to
+`TokenProvider.const(AccessToken.noop)` — no filesystem reads, no
+metadata-server probes. Useful for acceptance tests that need to
+silence credential resolution without otherwise touching the
+application wiring.
+
+**Caveat:** a stray production setting will silently produce a no-op
+provider instead of a loud "credentials not found" error. When the
+configuration channel can be controlled per environment, prefer the
+`gcp-auth-pureconfig` integration with `TokenType.NoOp` selected via
+`application.conf`.
+
 ### Reading the authenticated principal
 
 Every `TokenProvider` exposes a `principal: F[Option[String]]` accessor that
@@ -150,8 +185,11 @@ returns the subject identifier the provider is authenticated as:
 - **User-account flows** do a best-effort call to Google's `userinfo`
   endpoint and return `None` if the call fails (the refresh token may have
   been issued with scopes that don't include `email`/`openid`/`profile`).
-- **Identity-token flows** decode the issued JWT and return its `email`
-  (falling back to `sub`) claim, or `None` if neither is present.
+- **`identity` (workload identity token)** hits the GCE metadata server's
+  `/email` endpoint, mirroring the service-account workload flow.
+- **`userIdentity` (user-account identity token)** decodes the issued JWT
+  and returns its `email` claim (falling back to `sub`), or `None` if
+  neither is present.
 - `TokenProvider.const` and `TokenProvider.create` return `None`.
 
 Factories that need an HTTP call to resolve the principal memoise the
@@ -268,4 +306,5 @@ val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, m
 [Google User Account Token]: https://developers.google.com/identity/protocols/OAuth2WebServer
 [Identity Token]: https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
 [instance metadata API]: https://cloud.google.com/compute/docs/access/authenticate-workloads
+[ADC precedence]: https://cloud.google.com/docs/authentication/provide-credentials-adc
 [pureconfig]: https://pureconfig.github.io
