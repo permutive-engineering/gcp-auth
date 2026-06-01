@@ -53,7 +53,6 @@ import com.permutive.gcp.auth.models.Token
 import com.permutive.refreshable.Refreshable
 import fs2.io.file.Files
 import fs2.io.file.Path
-import io.circe.Decoder
 import io.circe.Json
 import io.circe.parser
 import org.http4s.EntityDecoder
@@ -215,10 +214,12 @@ object TokenProvider {
         .googleExpect[String](uri"identity" +? ("audience" -> audience))
         .mproduct(JwtCirce.decode(_, jwtOptions).toEither.flatMap(_.expiration.toRight(ExpirationNotFound)).liftTo[F])
         .flatMap { case (token, expiration) =>
+          val expiresAt = Instant.ofEpochSecond(expiration)
+
           Clock[F].realTimeInstant
-            .map(now => Duration.between(now, Instant.ofEpochSecond(expiration)).toSeconds())
+            .map(now => Duration.between(now, expiresAt).toSeconds())
             .map(ExpiresIn(_))
-            .map(AccessToken(Token(token), _))
+            .map(AccessToken(Token(token), _, expiresAt))
         }
         .adaptError { case t => new UnableToGetToken(t) }
     }
@@ -264,7 +265,7 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
     */
-  def userIdentity[F[_]: Concurrent](
+  def userIdentity[F[_]: Concurrent: Clock](
       clientId: ClientId,
       clientSecret: ClientSecret,
       refreshToken: RefreshToken,
@@ -280,11 +281,8 @@ object TokenProvider {
 
       val request = Request[F](POST, uri"https://oauth2.googleapis.com/token").withEntity(form)
 
-      val decoder = Decoder.forProduct2("id_token", "expires_in")(AccessToken.apply)
-
       httpClient
-        .expect[Json](request)
-        .flatMap(_.as[AccessToken](decoder).liftTo[F])
+        .expect[AccessToken](request)
         .adaptError { case t => new UnableToGetToken(t) }
     }
 
@@ -318,7 +316,7 @@ object TokenProvider {
     * @see
     *   https://cloud.google.com/compute/docs/access/authenticate-workloads
     */
-  def serviceAccount[F[_]: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] = {
+  def serviceAccount[F[_]: Concurrent: Clock](httpClient: Client[F]): F[TokenProvider[F]] = {
     val fetchToken =
       httpClient.googleExpect[AccessToken](uri"token").adaptError { case t => new UnableToGetToken(t) }
 
@@ -389,7 +387,7 @@ object TokenProvider {
     * @see
     *   https://developers.google.com/identity/protocols/oauth2
     */
-  def userAccount[F[_]: Concurrent: Files](
+  def userAccount[F[_]: Concurrent: Clock: Files](
       clientSecretsPath: Path,
       refreshTokenPath: Path,
       httpClient: Client[F]
@@ -407,7 +405,7 @@ object TokenProvider {
     * @see
     *   https://developers.google.com/identity/protocols/oauth2
     */
-  def userAccount[F[_]: Concurrent](
+  def userAccount[F[_]: Concurrent: Clock](
       clientId: ClientId,
       clientSecret: ClientSecret,
       refreshToken: RefreshToken,
