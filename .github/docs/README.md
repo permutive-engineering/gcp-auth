@@ -139,6 +139,31 @@ TokenProvider.userAccount[IO](
 TokenProvider.userAccount[IO](httpClient)
 ```
 
+### Reading the authenticated principal
+
+Every `TokenProvider` exposes a `principal: F[Option[String]]` accessor that
+returns the subject identifier the provider is authenticated as:
+
+- **Service-account flows** surface the service-account email — taken from
+  the JSON key file, the explicit `ClientEmail` parameter, or the GCE
+  metadata server's `/email` endpoint.
+- **User-account flows** do a best-effort call to Google's `userinfo`
+  endpoint and return `None` if the call fails (the refresh token may have
+  been issued with scopes that don't include `email`/`openid`/`profile`).
+- **Identity-token flows** decode the issued JWT and return its `email`
+  (falling back to `sub`) claim, or `None` if neither is present.
+- `TokenProvider.const` and `TokenProvider.create` return `None`.
+
+Factories that need an HTTP call to resolve the principal memoise the
+lookup at construction time, so each provider instance makes at most one
+underlying call regardless of how many times `principal` is read.
+
+```scala mdoc:silent
+import com.permutive.gcp.auth.TokenProvider
+
+TokenProvider.serviceAccount[IO](httpClient).flatMap(_.principal)
+```
+
 ### Creating and auto-refreshing & cached `TokenProvider`
 
 You can use `TokenProvider.cached` to create an auto-refreshing & cached
