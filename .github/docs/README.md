@@ -296,6 +296,37 @@ val tokenProvider = config.tokenType.tokenProvider(httpClient)
 val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, myAudience)
 ```
 
+### Authenticating with Google Managed Kafka
+
+The library also provides a SASL/OAUTHBEARER login callback handler for
+[Google Managed Service for Apache Kafka]. It is a drop-in replacement for
+Google's `com.google.cloud.hosted.kafka.auth.GcpLoginCallbackHandler` that
+uses `gcp-auth`'s `TokenProvider.auto` under the hood — no
+`kafka-schema-registry-client`, no Google Java SDK on the classpath.
+
+1. Add the following line to your `build.sbt` file:
+
+```sbt
+libraryDependencies += "@ORGANIZATION@" %% "@NAME@-kafka" % "@VERSION@"
+```
+
+2. Wire it into your Kafka client config:
+
+```properties
+security.protocol                 = SASL_SSL
+sasl.mechanism                    = OAUTHBEARER
+sasl.login.callback.handler.class = com.permutive.gcp.auth.kafka.GcpLoginCallbackHandler
+sasl.jaas.config                  = org.apache.kafka.common.security.oauthbearer.OAuthBearerLoginModule required;
+```
+
+The handler resolves credentials using ADC precedence (via
+`TokenProvider.auto`). The `sub` claim is taken from
+`GOOGLE_MANAGED_KAFKA_AUTH_PRINCIPAL` when set (overrides the provider's
+principal — useful for Workforce Identity Federation cases), otherwise
+from the provider's `principal`. If neither yields a value, `configure`
+raises `IllegalStateException` pointing at the env var (matching Google's
+fail-fast behavior).
+
 ## Contributors to this project
 
 @CONTRIBUTORS_TABLE@
@@ -307,4 +338,5 @@ val identityTokenProvider = config.tokenType.identityTokenProvider(httpClient, m
 [Identity Token]: https://cloud.google.com/run/docs/securing/service-identity#fetching_identity_and_access_tokens_using_the_metadata_server
 [instance metadata API]: https://cloud.google.com/compute/docs/access/authenticate-workloads
 [ADC precedence]: https://cloud.google.com/docs/authentication/provide-credentials-adc
+[Google Managed Service for Apache Kafka]: https://cloud.google.com/managed-service-for-apache-kafka/docs
 [pureconfig]: https://pureconfig.github.io
