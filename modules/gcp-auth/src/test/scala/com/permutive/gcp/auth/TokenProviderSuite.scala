@@ -19,19 +19,21 @@ package com.permutive.gcp.auth
 import java.security.KeyPairGenerator
 import java.security.interfaces.RSAPrivateKey
 import java.time.Instant
+import java.util.concurrent.atomic.AtomicInteger
 
 import cats.effect.IO
 import cats.effect.Resource
 import cats.syntax.all._
 
+import com.permutive.gcp.auth.errors.DefaultCredentialsFileNotFound
 import com.permutive.gcp.auth.errors.UnableToGetClientData
 import com.permutive.gcp.auth.errors.UnableToGetDefaultCredentials
 import com.permutive.gcp.auth.errors.UnableToGetToken
+import com.permutive.gcp.auth.errors.UnsupportedCredentialsType
 import com.permutive.gcp.auth.models.AccessToken
 import com.permutive.gcp.auth.models.ClientEmail
 import com.permutive.gcp.auth.models.ClientId
 import com.permutive.gcp.auth.models.ClientSecret
-import com.permutive.gcp.auth.models.ExpiresIn
 import com.permutive.gcp.auth.models.RefreshToken
 import com.permutive.gcp.auth.models.Token
 import fs2.Stream
@@ -78,13 +80,12 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(JwtCirce.encode(JwtClaim(expiration = expiration.some)))
     }
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
-
     for {
-      token <- tokenProvider.accessToken
+      tokenProvider <- TokenProvider.identity[IO](client, audience)
+      token         <- tokenProvider.accessToken
     } yield {
       assert(token.token.value.nonEmpty)
-      assert(token.expiresIn.value <= 60)
+      assertEquals(token.expiresAt, Instant.ofEpochSecond(expiration))
     }
   }
 
@@ -97,10 +98,8 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(JwtCirce.encode(JwtClaim()))
     }
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
-
     interceptIO[UnableToGetToken] {
-      tokenProvider.accessToken
+      TokenProvider.identity[IO](client, audience).flatMap(_.accessToken)
     }
   }
 
@@ -109,9 +108,21 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider.identity[IO](client, audience)
+    interceptIO[UnableToGetToken](TokenProvider.identity[IO](client, audience).flatMap(_.accessToken))
+  }
 
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+  test("TokenProvider.identity exposes the workload's service-account email as principal") {
+    val audience = uri"http://example.com/my-audience"
+
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok("workload-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.identity[IO](client, audience).flatMap(_.principal)
+
+    assertIO(result, Some("workload-sa@project.iam.gserviceaccount.com"))
   }
 
   ////////////////////////////
@@ -128,10 +139,28 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
     for {
       tokenProvider <- TokenProvider.userIdentity[IO](client)
       token         <- tokenProvider.accessToken
+      now           <- IO.realTimeInstant
     } yield {
       assert(token.token.value.nonEmpty)
-      assertEquals(token.expiresIn.value, 3600L)
+      assert(
+        token.expiresAt.isAfter(now.plusSeconds(3598)) && token.expiresAt.isBefore(now.plusSeconds(3601)),
+        s"expected expiresAt ~3600s from now, got: ${token.expiresAt}"
+      )
     }
+  }
+
+  fixture("/default/valid").test {
+    "TokenProvider.userIdentity extracts the email claim from the id_token JWT"
+  } { _ =>
+    val idToken = JwtCirce.encode(JwtClaim(content = Json.obj("email" := "user@example.com").noSpaces))
+
+    val client = Client.from { case POST -> Root / "token" =>
+      Ok(Json.obj("id_token" := idToken, "expires_in" := 3600))
+    }
+
+    val result = TokenProvider.userIdentity[IO](client).flatMap(_.principal)
+
+    assertIO(result, Some("user@example.com"))
   }
 
   fixture("/").test {
@@ -139,7 +168,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
   } { _ =>
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    interceptIO[UnableToGetDefaultCredentials] {
+    interceptIO[DefaultCredentialsFileNotFound.type] {
       TokenProvider.userIdentity[IO](client).flatMap(_.accessToken)
     }
   }
@@ -155,19 +184,15 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    val tokenProvider = TokenProvider.serviceAccount[IO](client)
+    val result = TokenProvider.serviceAccount[IO](client).flatMap(_.accessToken)
 
-    val result = tokenProvider.accessToken
-
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.serviceAccount(Client) returns an error on any failure") {
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider.serviceAccount[IO](client)
-
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+    interceptIO[UnableToGetToken](TokenProvider.serviceAccount[IO](client).flatMap(_.accessToken))
   }
 
   //////////////////////////////////////////////////////////////
@@ -185,7 +210,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .serviceAccount[IO](path, "scope_1" :: "scope_2" :: Nil, client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.serviceAccount(Path, List[String], Client) returns an error on any failure") {
@@ -240,7 +265,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
 
     val result = tokenProvider.accessToken
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test {
@@ -271,7 +296,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .userAccount[IO](client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   fixture("/").test {
@@ -281,7 +306,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    interceptIO[UnableToGetDefaultCredentials] {
+    interceptIO[DefaultCredentialsFileNotFound.type] {
       TokenProvider
         .userAccount[IO](client)
         .flatMap(_.accessToken)
@@ -297,21 +322,21 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       Ok(Json.obj("access_token" := "token", "expires_in" := 3600))
     }
 
-    val tokenProvider = TokenProvider
+    val result = TokenProvider
       .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
+      .flatMap(_.accessToken)
 
-    val result = tokenProvider.accessToken
-
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.userAccount(ClientId, ClientSecret, RefreshToken, Client) retuns an error on any failure") {
     val client = Client.fromHttpApp(HttpApp.notFound[IO])
 
-    val tokenProvider = TokenProvider
-      .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
-
-    interceptIO[UnableToGetToken](tokenProvider.accessToken)
+    interceptIO[UnableToGetToken] {
+      TokenProvider
+        .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
+        .flatMap(_.accessToken)
+    }
   }
 
   ///////////////////////////////////////////////////
@@ -330,7 +355,7 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
       .userAccount[IO](clientSecretsPath, refreshTokenPath, client)
       .flatMap(_.accessToken)
 
-    assertIO(result, AccessToken(Token("token"), ExpiresIn(3600)))
+    assertIO(result.map(_.token), Token("token"))
   }
 
   test("TokenProvider.userAccount(Path, Path, Client) retuns an error on any failure") {
@@ -344,6 +369,280 @@ class TokenProviderSuite extends CatsEffectSuite with Http4sMUnitSyntax {
         .userAccount[IO](clientSecretsPath, refreshTokenPath, client)
         .flatMap(_.accessToken)
     }
+  }
+
+  //////////////////////////////
+  // TokenProvider.principal //
+  //////////////////////////////
+
+  test("TokenProvider.principal returns None for const") {
+    val tokenProvider = TokenProvider.const[IO](AccessToken.noop)
+
+    assertIO(tokenProvider.principal, None)
+  }
+
+  test("TokenProvider.principal for serviceAccount(client) reads metadata /email") {
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok("workload-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.serviceAccount[IO](client).flatMap(_.principal)
+
+    assertIO(result, Some("workload-sa@project.iam.gserviceaccount.com"))
+  }
+
+  test("TokenProvider.principal for serviceAccount(client) propagates failure (metadata unreachable)") {
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    val result = TokenProvider.serviceAccount[IO](client).flatMap(_.principal).attempt
+
+    result.map(r => assert(r.isLeft))
+  }
+
+  test("TokenProvider.principal for serviceAccount(Path, scopes, client) reads client_email from JSON") {
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    val path = resourcePath("valid_service_account_file.json")
+
+    val result = TokenProvider
+      .serviceAccount[IO](path, "scope" :: Nil, client)
+      .flatMap(_.principal)
+
+    assertIO(result, Some("my@example.com"))
+  }
+
+  test("TokenProvider.principal for serviceAccount(ClientEmail, key, scopes, client) returns Some(email.value)") {
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    val key = KeyPairGenerator.getInstance("RSA").genKeyPair().getPrivate().asInstanceOf[RSAPrivateKey]
+
+    val tokenProvider =
+      TokenProvider.serviceAccount[IO](ClientEmail("direct-sa@project.iam.gserviceaccount.com"), key, Nil, client)
+
+    assertIO(tokenProvider.principal, Some("direct-sa@project.iam.gserviceaccount.com"))
+  }
+
+  test("TokenProvider.principal for userAccount(id, secret, refresh, client) reads userinfo") {
+    val client = Client.from {
+      case POST -> Root / "token" =>
+        Ok(Json.obj("access_token" := "abc", "expires_in" := 3600))
+      case req @ GET -> Root / "oauth2" / "v3" / "userinfo" if req.hasHeader("Authorization", "Bearer abc") =>
+        Ok(Json.obj("email" := "user@example.com"))
+    }
+
+    val result = TokenProvider
+      .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
+      .flatMap(_.principal)
+
+    assertIO(result, Some("user@example.com"))
+  }
+
+  test("TokenProvider.principal for userAccount(...) returns None on failure") {
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    val result = TokenProvider
+      .userAccount[IO](ClientId("client_id"), ClientSecret("client_secret"), RefreshToken("refresh_token"), client)
+      .flatMap(_.principal)
+
+    assertIO(result, None)
+  }
+
+  ////////////////////////////////////
+  // TokenProvider.auto             //
+  ////////////////////////////////////
+
+  fixture("/default/valid").test("TokenProvider.auto routes to userAccount when ADC user file exists") { _ =>
+    val client = Client.from {
+      case POST -> Root / "token" =>
+        Ok(Json.obj("access_token" := "user-token", "expires_in" := 3600))
+      case req @ GET -> Root / "oauth2" / "v3" / "userinfo" if req.hasHeader("Authorization", "Bearer user-token") =>
+        Ok(Json.obj("email" := "adc-user@example.com"))
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken.map(_.token), provider.principal).tupled
+    }
+
+    assertIO(result, (Token("user-token"), Some("adc-user@example.com")))
+  }
+
+  fixture("/default/sa-valid").test("TokenProvider.auto routes to serviceAccount when ADC SA file exists") { _ =>
+    val client = Client.from { case POST -> Root / "token" =>
+      Ok(Json.obj("access_token" := "sa-token", "expires_in" := 3600))
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken.map(_.token), provider.principal).tupled
+    }
+
+    assertIO(result, (Token("sa-token"), Some("my@example.com")))
+  }
+
+  fixture("/default/missing").test("TokenProvider.auto falls back to metadata server when no ADC file is found") { _ =>
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "metadata-token", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok("metadata-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      (provider.accessToken.map(_.token), provider.principal).tupled
+    }
+
+    assertIO(result, (Token("metadata-token"), Some("metadata-sa@project.iam.gserviceaccount.com")))
+  }
+
+  ///////////////////////////////////////////////
+  // TokenProvider.auto (identity-token flavor) //
+  ///////////////////////////////////////////////
+
+  fixture("/default/valid").test("TokenProvider.auto(client, audience) routes to userIdentity when ADC file exists") {
+    _ =>
+      val idToken = JwtCirce.encode(JwtClaim(content = Json.obj("email" := "adc-user@example.com").noSpaces))
+
+      val client = Client.from { case POST -> Root / "token" =>
+        Ok(Json.obj("id_token" := idToken, "expires_in" := 3600))
+      }
+
+      val audience = uri"http://example.com/my-audience"
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.principal)
+
+      assertIO(result, Some("adc-user@example.com"))
+  }
+
+  fixture("/default/missing")
+    .test("TokenProvider.auto(client, audience) falls back to metadata server when no ADC file is found") { _ =>
+      val audience = uri"http://example.com/my-audience"
+
+      val expiration = Instant.now().plusSeconds(60).getEpochSecond()
+
+      val client = Client.from {
+        case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "identity"
+            if req.hasParam("audience", audience.renderString) && req.hasHeader("Metadata-Flavor", "Google") =>
+          Ok(JwtCirce.encode(JwtClaim(expiration = expiration.some)))
+        case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+            if req.hasHeader("Metadata-Flavor", "Google") =>
+          Ok("metadata-sa@project.iam.gserviceaccount.com")
+      }
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.principal)
+
+      assertIO(result, Some("metadata-sa@project.iam.gserviceaccount.com"))
+    }
+
+  fixture("/default/external")
+    .test("TokenProvider.auto raises UnableToGetDefaultCredentials for non-SA / non-user types") { _ =>
+      val client = Client.from(PartialFunction.empty)
+
+      val result = TokenProvider.auto[IO](client).flatMap(_.accessToken).attempt
+
+      result.map {
+        case Left(_: UnableToGetDefaultCredentials) => ()
+        case other                                  => fail(s"expected UnableToGetDefaultCredentials, got: $other")
+      }
+    }
+
+  fixture("/default/sa-valid")
+    .test("TokenProvider.auto(client, audience) raises UnsupportedCredentialsType for service_account") { _ =>
+      val audience = uri"http://example.com/my-audience"
+      val client   = Client.from(PartialFunction.empty)
+
+      val result = TokenProvider.auto[IO](client, audience).flatMap(_.accessToken).attempt
+
+      result.map {
+        case Left(_: UnsupportedCredentialsType) => ()
+        case other                               => fail(s"expected UnsupportedCredentialsType, got: $other")
+      }
+    }
+
+  /////////////////////////////////////
+  // TokenProvider.auto disable      //
+  /////////////////////////////////////
+
+  def disableFixture = ResourceFunFixture {
+    Resource.make(IO(sys.props.put("gcp.auth.disable", "true")).void)(_ =>
+      IO(sys.props.remove("gcp.auth.disable")).void
+    )
+  }
+
+  disableFixture.test("TokenProvider.auto(client) short-circuits to AccessToken.noop when disabled") { _ =>
+    val client = Client.fromHttpApp(HttpApp.notFound[IO])
+
+    assertIO(TokenProvider.auto[IO](client).flatMap(_.accessToken), AccessToken.noop)
+  }
+
+  disableFixture.test("TokenProvider.auto(client, audience) short-circuits to AccessToken.noop when disabled") { _ =>
+    val client   = Client.fromHttpApp(HttpApp.notFound[IO])
+    val audience = uri"http://example.com/my-audience"
+
+    assertIO(TokenProvider.auto[IO](client, audience).flatMap(_.accessToken), AccessToken.noop)
+  }
+
+  disableFixture.test("argless TokenProvider.auto[IO] short-circuits without allocating a JdkHttpClient") { _ =>
+    assertIO(TokenProvider.auto[IO].use(_.accessToken), AccessToken.noop)
+  }
+
+  fixture("/default/missing").test("TokenProvider.auto memoises principal across calls") { _ =>
+    val counter = new AtomicInteger(0)
+
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "tok", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        IO(counter.incrementAndGet()) *> Ok("metadata-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.auto[IO](client).flatMap { provider =>
+      provider.principal.replicateA(5).map(_ => counter.get())
+    }
+
+    assertIO(result, 1)
+  }
+
+  /////////////////////////////////////////
+  // TokenProvider.cached preserves principal
+  /////////////////////////////////////////
+
+  test("TokenProvider.cached preserves principal from the underlying provider") {
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "tok", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok("workload-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.cached[IO].build(TokenProvider.serviceAccount[IO](client)).use(_.principal)
+
+    assertIO(result, Some("workload-sa@project.iam.gserviceaccount.com"))
+  }
+
+  test("TokenProvider.cached memoises principal across calls") {
+    val counter = new AtomicInteger(0)
+
+    val client = Client.from {
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "token"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        Ok(Json.obj("access_token" := "tok", "expires_in" := 3600))
+      case req @ GET -> Root / "computeMetadata" / "v1" / "instance" / "service-accounts" / "default" / "email"
+          if req.hasHeader("Metadata-Flavor", "Google") =>
+        IO(counter.incrementAndGet()) *> Ok("workload-sa@project.iam.gserviceaccount.com")
+    }
+
+    val result = TokenProvider.cached[IO].build(TokenProvider.serviceAccount[IO](client)).use { cached =>
+      cached.principal.replicateA(5).map(_ => counter.get())
+    }
+
+    assertIO(result, 1)
   }
 
   ////////////////////////////////////

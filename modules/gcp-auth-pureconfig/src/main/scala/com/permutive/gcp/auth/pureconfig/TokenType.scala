@@ -16,8 +16,7 @@
 
 package com.permutive.gcp.auth.pureconfig
 
-import cats.effect.Concurrent
-import cats.effect.kernel.Clock
+import cats.effect.Async
 import cats.syntax.all._
 
 import _root_.pureconfig.ConfigReader
@@ -43,9 +42,9 @@ sealed trait TokenType {
     *   - [[TokenType.NoOp]]: will return a provider that always returns
     *     [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]].
     */
-  def tokenProvider[F[_]: Files: Concurrent](httpClient: Client[F]): F[TokenProvider[F]] = this match {
+  def tokenProvider[F[_]: Files: Async](httpClient: Client[F]): F[TokenProvider[F]] = this match {
     case TokenType.UserAccount    => TokenProvider.userAccount[F](httpClient)
-    case TokenType.ServiceAccount => TokenProvider.serviceAccount[F](httpClient).pure[F]
+    case TokenType.ServiceAccount => TokenProvider.serviceAccount[F](httpClient)
     case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
   }
 
@@ -57,10 +56,10 @@ sealed trait TokenType {
     *   - [[TokenType.NoOp]]: will return a provider that always returns
     *     [[com.permutive.gcp.auth.models.AccessToken.noop AccessToken.noop]].
     */
-  def identityTokenProvider[F[_]: Files: Concurrent: Clock](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
+  def identityTokenProvider[F[_]: Files: Async](httpClient: Client[F], audience: Uri): F[TokenProvider[F]] =
     this match {
       case TokenType.UserAccount    => TokenProvider.userIdentity[F](httpClient)
-      case TokenType.ServiceAccount => TokenProvider.identity[F](httpClient, audience).pure[F]
+      case TokenType.ServiceAccount => TokenProvider.identity[F](httpClient, audience)
       case TokenType.NoOp           => TokenProvider.const(AccessToken.noop).pure[F]
     }
 
